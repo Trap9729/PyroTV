@@ -15,6 +15,8 @@
 #   --hostname NAME    host name, for http://NAME.local (default pyrotv)
 #   --app-only         only (re)install the app files, venv and unit, then
 #                      restart the service (used by deploy/update.sh)
+#   --allow-other-os   run on a release other than Bookworm (UNTESTED; the
+#                      installer refuses by default, see README "Which OS image")
 #
 # Idempotent: safe to re-run. The data partition (/data, label "data") is
 # created once and is NEVER reformatted. Read deploy/README.md first: the
@@ -33,6 +35,9 @@ readonly ENV_FILE="/etc/pyrotv.env"
 readonly MIN_DATA_GIB=4
 readonly MIN_ROOT_GIB=6
 readonly ALIGN=2048                 # sectors (1 MiB with 512-byte sectors)
+# OS releases (/etc/os-release VERSION_CODENAME, space-separated) this installer
+# was written and reviewed for. Anything else is refused (see --allow-other-os).
+readonly ALLOWED_CODENAMES="bookworm"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly SCRIPT_DIR
@@ -43,6 +48,7 @@ DRY_RUN=0
 ASSUME_YES=0
 DEV_MODE=0
 APP_ONLY=0
+ALLOW_OTHER_OS=0
 DISK="/dev/mmcblk0"
 ROOT_SIZE_GIB=12
 SSID=""
@@ -93,7 +99,7 @@ part_dev() {
 }
 
 usage() {
-    sed -n '2,22p' "$0"
+    sed -n '2,24p' "$0"
     exit "${1:-0}"
 }
 
@@ -104,6 +110,7 @@ parse_args() {
             --yes|-y) ASSUME_YES=1 ;;
             --dev) DEV_MODE=1 ;;
             --app-only) APP_ONLY=1 ;;
+            --allow-other-os) ALLOW_OTHER_OS=1 ;;
             --disk) DISK="${2:?--disk needs a value}"; shift ;;
             --root-size)
                 ROOT_SIZE_GIB="${2:?--root-size needs a value}"; shift
@@ -129,6 +136,39 @@ overlay_active() {
         || [[ "$(findmnt -no FSTYPE / 2>/dev/null || true)" == "overlay" ]]
 }
 
+# Hard stop unless the OS codename is one this installer was written and
+# reviewed for. Trixie (Raspberry Pi OS since October 2025, Imager's default)
+# differs in exactly what this script relies on: the first-boot resize
+# (`resize` token + resize_early/rpi-resize.service instead of
+# init=.../firstboot), Imager customisation (cloud-init) and package names.
+check_os() {
+    local codename="" pretty="unknown" allowed
+    if [[ -r /etc/os-release ]]; then
+        # shellcheck disable=SC1091
+        codename="$(. /etc/os-release && printf '%s' "${VERSION_CODENAME:-}")"
+        # shellcheck disable=SC1091
+        pretty="$(. /etc/os-release && printf '%s' "${PRETTY_NAME:-unknown}")"
+    fi
+    info "OS: $pretty (VERSION_CODENAME=${codename:-?})"
+    for allowed in $ALLOWED_CODENAMES; do
+        if [[ "$codename" == "$allowed" ]]; then
+            return 0
+        fi
+    done
+    local msg="this installer supports only Raspberry Pi OS with VERSION_CODENAME in: $ALLOWED_CODENAMES
+(this system: '${codename:-unknown}'). Re-flash the card with Raspberry Pi Imager:
+  Raspberry Pi OS (other) -> Raspberry Pi OS (Legacy, 64-bit) Lite   (Debian 12 Bookworm)
+See deploy/README.md, 'Which OS image'. To run anyway (untested): --allow-other-os"
+    if (( ALLOW_OTHER_OS )); then
+        warn "!!! --allow-other-os: '${codename:-unknown}' is NOT a tested release ($ALLOWED_CODENAMES).
+             The first-boot resize, package names and overlay handling may differ. Continuing at your own risk."
+    elif (( DRY_RUN )); then
+        warn "a real run would STOP here: $msg"
+    else
+        die "$msg"
+    fi
+}
+
 preflight() {
     log "Preflight"
     if (( DRY_RUN )); then
@@ -149,13 +189,7 @@ preflight() {
 Disable it first: sudo $SCRIPT_DIR/overlay.sh disable && sudo reboot"
         fi
     fi
-    if [[ -r /etc/os-release ]]; then
-        # shellcheck disable=SC1091
-        . /etc/os-release
-        info "OS: ${PRETTY_NAME:-unknown}"
-        [[ "${VERSION_CODENAME:-}" == "bookworm" ]] \
-            || warn "written for Raspberry Pi OS Bookworm, this is '${VERSION_CODENAME:-?}': package names may differ"
-    fi
+    check_os
     [[ "$(uname -m)" == "aarch64" ]] || warn "expected aarch64 (64-bit Pi OS), got $(uname -m)"
     [[ -f "$SRC_ROOT/backend/pyproject.toml" ]] || die "cannot find the app sources at $SRC_ROOT"
 }

@@ -52,9 +52,64 @@ default) for managing the shop's PyroTV from a phone.
   thumbnails and `hotspot.json`. The journal is kept in RAM (32 MB max), swap
   is compressed RAM (zram), because a swap file cannot live on the overlay.
 
+## Which OS image
+
+**Use Raspberry Pi OS Lite 64-bit, Debian 12 "Bookworm". Not the current
+default.** The installer refuses any other release (`VERSION_CODENAME` from
+`/etc/os-release` must be in `ALLOWED_CODENAMES`, currently `bookworm`).
+`--allow-other-os` overrides this; it is untested and prints a loud warning.
+
+Raspberry Pi OS moved to Debian 13 "Trixie" in October 2025. Imager's default
+"Raspberry Pi OS Lite (64-bit)" is therefore Trixie. Bookworm is still offered
+as a Legacy image. Trixie differs in exactly the things this installer and the
+procedure below rely on. Checked against the RPi-Distro sources (pi-gen
+`master` vs `bookworm`, raspberrypi-sys-mods `pios/trixie` vs `bookworm`):
+
+- **First-boot resize.** Bookworm's `cmdline.txt` carries
+  `init=/usr/lib/raspberrypi-sys-mods/firstboot`, and the initramfs script
+  `local-premount/firstboot` grows the root. Trixie's `cmdline.txt` ends in a
+  plain `resize` token instead, and the work is done by
+  `local-premount/resize_early` plus an `rpi-resize.service`. Step 2 below
+  would not stop it.
+- **Imager customisation.** Trixie images include cloud-init (pi-gen
+  `stage2/04-cloud-init`), not Bookworm's `firstrun.sh`/`custom.toml`.
+- **Packages and swap.** Trixie ships its own swap setup (zram by default,
+  according to a Raspberry Pi staff comment on the Trixie announcement).
+  Chromium packaging and the availability of `squeekboard` were not checked
+  for Trixie.
+- **Overlay.** `raspi-config`'s overlay code (`trixie` branch) still adds a
+  bare `overlayroot=tmpfs` and greps for it the same way. So `overlay.sh` would
+  probably work, but this was not tested.
+
+Raspberry Pi recommends a clean flash over upgrading Bookworm to Trixie in
+place, and says Bookworm keeps getting updates while it is offered as Legacy.
+
+In **Raspberry Pi Imager**: *Choose OS* → **Raspberry Pi OS (other)** →
+**Raspberry Pi OS (Legacy, 64-bit) Lite** (described as Debian Bookworm). The
+exact wording comes from third-party guides written after the Trixie release.
+I could not check the menu in a current Imager, so look for the entry that
+says *Legacy*, *64-bit*, *Lite* and *Bookworm*. After the first boot,
+`grep VERSION_CODENAME /etc/os-release` must print `bookworm`.
+
+Sources:
+- [Trixie announcement](https://www.raspberrypi.com/news/trixie-the-new-version-of-raspberry-pi-os/)
+  (2 Oct 2025: clean flash recommended)
+- [Last Bookworm release](https://www.raspberrypi.com/news/a-new-raspberry-pi-os-release/)
+  (May 2025)
+- [raspberrytips: OS versions](https://raspberrytips.com/raspberry-pi-os-versions/)
+  (Legacy = Bookworm, updates while it is offered as Legacy)
+- [SunFounder install guide](https://docs.sunfounder.com/projects/ai-lab-kit/en/latest/_sources/quick_start/install_the_os.rst.txt)
+  (menu path)
+- RPi-Distro on GitHub: `pi-gen` (`stage1/00-boot-files/files/cmdline.txt`),
+  `raspberrypi-sys-mods` and `raspi-config` (branches `bookworm` /
+  `pios/trixie` / `trixie`).
+
 ## Install from scratch
 
-1. **Flash** Raspberry Pi OS Lite (64-bit, Bookworm) with Raspberry Pi Imager.
+1. **Flash** the Bookworm Legacy image with Raspberry Pi Imager: *Choose OS* →
+   **Raspberry Pi OS (other)** → **Raspberry Pi OS (Legacy, 64-bit) Lite**.
+   Do not use the default "Raspberry Pi OS Lite (64-bit)": that is Trixie, and
+   the installer will refuse it (see [Which OS image](#which-os-image)).
    In the Imager's OS customisation set a user name and password, enable SSH,
    and (for the install only) your Wi-Fi or plug in Ethernet. The install
    downloads packages, so it needs internet.
@@ -113,7 +168,8 @@ default) for managing the shop's PyroTV from a phone.
 
 ### What the installer does, in order
 
-1. Preflight: Linux, root, Bookworm, aarch64; refuses while the overlay is on.
+1. Preflight: Linux, root, aarch64. Stops unless `VERSION_CODENAME` is
+   `bookworm` (override: `--allow-other-os`). Also stops while the overlay is on.
 2. `apt-get install`: sway, squeekboard, Chromium (`chromium-browser` if the
    Pi repository offers it, else `chromium`), mpv, ffmpeg, PipeWire
    (`pipewire`, `pipewire-pulse`, `wireplumber`), `pulseaudio-utils`
@@ -286,6 +342,9 @@ real 1 GB board before the shop install if possible.
 Nothing below has run on hardware. Tick each item during Task 0 / Task 16 and
 fix the files here where reality differs.
 
+- [ ] **OS release**: `cat /etc/os-release` shows `VERSION_CODENAME=bookworm`
+      (the Legacy image was flashed, not the default Trixie); note the Imager
+      version and the exact menu wording used.
 - [ ] **Card prep**: removing `init=/usr/lib/raspberrypi-sys-mods/firstboot`
       keeps the root small; SSH host keys exist (`ls /etc/ssh/ssh_host_*`);
       the Imager user and SSH work. Note what the Imager wrote (`firstrun.sh`
