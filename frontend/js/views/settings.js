@@ -161,6 +161,14 @@ export function renderSettings(root, ctx) {
     card.append(label, input, el("p", "set-note", t("wizard.shop.hint")), save);
     check();
     node.append(heading(t("settings.nav.shop")), card);
+    return {
+      // The stored name changed behind our back (backup import): show it and use it as the baseline.
+      reset() {
+        saved = String(ctx.state?.shop_name ?? "").trim();
+        input.value = saved;
+        check();
+      },
+    };
   });
 
   // ===== 2. manufacturers + pieces =====
@@ -500,6 +508,7 @@ export function renderSettings(root, ctx) {
           await backupImport();
           await ctx.refreshState();
           markStale("mfrs");
+          panels.get("shop")?.api.reset?.();
           if (alive) say(t("settings.backup.imported"), "ok");
         } catch (err) {
           if (alive) say(failText(err), "error");

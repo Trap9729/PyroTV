@@ -76,13 +76,15 @@ test("a failed PUT triggers a status GET and resumes at the server's offset", as
         failed = true;
         return json(500, { detail: "boom" });
       }
+      // The server says it got the whole chunk after all: the client must trust that, not its own offset.
+      if (c.method === "GET") return json(200, { id: "u1", size, received: 8 * MiB });
     },
   });
   await uploadFile(fakeFile(size), "video", { chunkSize: 4 * MiB, fetchFn, sleepFn: noSleep });
   const seq = calls.map((c) => `${c.method} ${c.offset ?? c.path}`);
   const i = seq.indexOf(`PUT ${4 * MiB}`);
   assert.equal(seq[i + 1], "GET /api/uploads/u1");
-  assert.equal(seq[i + 2], `PUT ${4 * MiB}`);
+  assert.equal(seq[i + 2], `PUT ${8 * MiB}`);
 });
 
 test("retry waits the backoff via sleepFn", async () => {
@@ -126,13 +128,15 @@ test("a network failure (fetch rejects) is followed by a status GET", async () =
         thrown = true;
         throw new TypeError("Failed to fetch");
       }
+      // The server got part of the chunk before the connection died.
+      if (c.method === "GET") return json(200, { id: "u1", size, received: 5 * MiB });
     },
   });
   await uploadFile(fakeFile(size), "video", { chunkSize: 4 * MiB, fetchFn, sleepFn: noSleep });
   const seq = calls.map((c) => c.method);
   const i = seq.lastIndexOf("GET");
   assert.ok(i > 0);
-  assert.equal(calls[i + 1].offset, String(4 * MiB));
+  assert.equal(calls[i + 1].offset, String(5 * MiB));
 });
 
 test("five consecutive failures reject with an UploadError", async () => {
@@ -245,4 +249,101 @@ test("onRetry is told about each counted failure", async () => {
   const seen = [];
   await uploadFile(fakeFile(size), "video", { fetchFn, sleepFn: noSleep, onRetry: (k) => seen.push(k) });
   assert.deepEqual(seen, [1, 2]);
+});
+
+test("a long outage (PUT and status GET both failing) is one strike per cycle and resumes without restarting", async () => {
+  const size = 10 * MiB;
+  let down = 0; // number of PUT attempts to fail before the network returns
+  const { fetchFn, calls } = fakeServer({
+    size,
+    script: (c) => {
+      if (c.offset === String(4 * MiB) && c.method === "PUT" && down < 3) {
+        down++;
+        throw new TypeError("Failed to fetch");
+      }
+      if (c.method === "GET" && down > 0 && down < 3) throw new TypeError("Failed to fetch");
+      if (c.method === "GET") return json(200, { id: "u1", size, received: 4 * MiB });
+    },
+  });
+  const sleeps = [];
+  await uploadFile(fakeFile(size), "video", {
+    chunkSize: 4 * MiB,
+    fetchFn,
+    sleepFn: (ms) => (sleeps.push(ms), Promise.resolve()),
+  });
+  assert.equal(calls.filter((c) => c.method === "POST" && c.path === "/api/uploads").length, 1);
+  assert.deepEqual(sleeps, [1000, 2000, 4000]);
+  assert.deepEqual(
+    calls.filter((c) => c.method === "PUT").map((c) => Number(c.offset)).slice(-2),
+    [4 * MiB, 8 * MiB],
+  );
+});
+
+test("backoff doubles 1000/2000/4000/8000 and the final error carries the upload id", async () => {
+  const size = 4 * MiB;
+  const { fetchFn } = fakeServer({
+    size,
+    script: (c) => {
+      if (c.method !== "POST" || c.path !== "/api/uploads") throw new TypeError("Failed to fetch");
+    },
+  });
+  const sleeps = [];
+  await assert.rejects(
+    uploadFile(fakeFile(size), "video", { fetchFn, sleepFn: (ms) => (sleeps.push(ms), Promise.resolve()) }),
+    (e) => e instanceof UploadError && e.uploadId === "u1" && e.status === 0,
+  );
+  assert.deepEqual(sleeps, [1000, 2000, 4000, 8000]);
+});
+
+test("onUploadId reports the id as soon as the upload exists", async () => {
+  const { fetchFn } = fakeServer({ size: MiB });
+  const ids = [];
+  await uploadFile(fakeFile(MiB), "video", { fetchFn, sleepFn: noSleep, onUploadId: (i) => ids.push(i) });
+  assert.deepEqual(ids, ["u1"]);
+});
+
+test("resumeId skips the POST, asks the server for received and continues from there", async () => {
+  const size = 10 * MiB;
+  const { fetchFn, calls } = fakeServer({ size, received: 4 * MiB });
+  const progress = [];
+  const id = await uploadFile(fakeFile(size), "video", {
+    chunkSize: 4 * MiB,
+    fetchFn,
+    sleepFn: noSleep,
+    resumeId: "u1",
+    onProgress: (f) => progress.push(f),
+  });
+  assert.equal(id, "u1");
+  assert.equal(calls[0].method, "GET");
+  assert.equal(calls[0].path, "/api/uploads/u1");
+  assert.ok(!calls.some((c) => c.method === "POST" && c.path === "/api/uploads"));
+  assert.deepEqual(
+    calls.filter((c) => c.method === "PUT").map((c) => Number(c.offset)),
+    [4 * MiB, 8 * MiB],
+  );
+  assert.equal(progress[0], 0.4);
+  assert.equal(progress.at(-1), 1);
+});
+
+test("a 404 on resume falls back to a fresh upload", async () => {
+  const size = 5 * MiB;
+  const { fetchFn, calls } = fakeServer({
+    size,
+    script: (c) => (c.method === "GET" && c.path === "/api/uploads/old" ? json(404, { detail: "unknown" }) : undefined),
+  });
+  const ids = [];
+  const id = await uploadFile(fakeFile(size), "video", {
+    chunkSize: 4 * MiB,
+    fetchFn,
+    sleepFn: noSleep,
+    resumeId: "old",
+    onUploadId: (i) => ids.push(i),
+  });
+  assert.equal(id, "u1");
+  assert.deepEqual(ids, ["u1"]);
+  assert.deepEqual(
+    calls.slice(0, 2).map((c) => `${c.method} ${c.path}`),
+    ["GET /api/uploads/old", "POST /api/uploads"],
+  );
+  assert.equal(calls.filter((c) => c.method === "PUT").length, 2);
 });

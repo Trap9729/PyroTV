@@ -148,7 +148,8 @@ export function createCustomPanel(host, env = {}) {
   let mfrs = [];
   let abort = null;
   let pollTimer = null;
-  let cache = { video: null, videoId: null, image: null, imageId: null };
+  const freshCache = () => ({ video: null, videoId: null, image: null, imageId: null, partial: {} });
+  let cache = freshCache();
 
   // ----- header + form shell -----
   const head = el("div", "set-row-head");
@@ -178,11 +179,13 @@ export function createCustomPanel(host, env = {}) {
   const video = filePicker(t("custom.video"), "video/*,.mkv,.avi", () => {
     cache.video = null;
     cache.videoId = null;
+    delete cache.partial.video;
     sync();
   });
   const image = filePicker(t("custom.image"), "image/*", () => {
     cache.image = null;
     cache.imageId = null;
+    delete cache.partial.image;
     sync();
   });
 
@@ -298,7 +301,7 @@ export function createCustomPanel(host, env = {}) {
     iBar.reset();
     jobBar.hidden = true;
     setStatus("");
-    cache = { video: null, videoId: null, image: null, imageId: null };
+    cache = freshCache();
     fillMfrs();
   }
 
@@ -354,13 +357,23 @@ export function createCustomPanel(host, env = {}) {
     vBar.reset();
     iBar.reset();
     const onRetry = () => alive && setStatus(t("custom.retrying"), "warn");
+    // An unfinished upload of the same File is resumed on "try again", not restarted.
+    const resumeOpts = (kindKey, file) => ({
+      signal,
+      onRetry,
+      resumeId: cache.partial[kindKey]?.file === file ? cache.partial[kindKey].id : undefined,
+      onUploadId: (id) => {
+        cache.partial[kindKey] = { file, id };
+      },
+    });
     try {
       if (cache.video === videoFile && cache.videoId) {
         vBar.set(1);
       } else {
         setStatus(t("custom.uploadingVideo"));
         vBar.set(0);
-        cache.videoId = await uploadFile(videoFile, "video", { signal, onRetry, onProgress: (p) => vBar.set(p) });
+        cache.videoId = await uploadFile(videoFile, "video", { ...resumeOpts("video", videoFile), onProgress: (p) => vBar.set(p) });
+        delete cache.partial.video;
         cache.video = videoFile;
       }
       let imageId;
@@ -370,7 +383,8 @@ export function createCustomPanel(host, env = {}) {
         } else {
           setStatus(t("custom.uploadingImage"));
           iBar.set(0);
-          cache.imageId = await uploadFile(imageFile, "image", { signal, onRetry, onProgress: (p) => iBar.set(p) });
+          cache.imageId = await uploadFile(imageFile, "image", { ...resumeOpts("image", imageFile), onProgress: (p) => iBar.set(p) });
+          delete cache.partial.image;
           cache.image = imageFile;
         }
         imageId = cache.imageId;
@@ -388,7 +402,7 @@ export function createCustomPanel(host, env = {}) {
       try {
         job = await createCustom(body);
       } catch (err) {
-        if (err?.status === 404 || err?.status === 422) cache = { video: null, videoId: null, image: null, imageId: null };
+        if (err?.status === 404 || err?.status === 422) cache = freshCache();
         throw err;
       }
       if (!alive) return;
@@ -424,7 +438,7 @@ export function createCustomPanel(host, env = {}) {
         if (job.state === "error") {
           jobBar.hidden = true;
           setStatus(jobFailureText(job.message), "error");
-          cache = { video: null, videoId: null, image: null, imageId: null };
+          cache = freshCache();
           setBusy(false);
           return;
         }

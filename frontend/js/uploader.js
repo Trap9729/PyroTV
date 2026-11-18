@@ -2,11 +2,12 @@
 // many bytes it has ("received"); after any hiccup we ask it and carry on from there.
 
 export class UploadError extends Error {
-  constructor(message, { status = 0, detail = null } = {}) {
+  constructor(message, { status = 0, detail = null, uploadId = null } = {}) {
     super(message);
     this.name = "UploadError";
     this.status = status;
     this.detail = detail;
+    this.uploadId = uploadId; // set once the server knows the upload: lets the caller resume
   }
 }
 
@@ -42,6 +43,8 @@ export async function uploadFile(
   {
     onProgress,
     onRetry,
+    onUploadId,
+    resumeId,
     chunkSize = 4 * 1024 * 1024,
     fetchFn = (...a) => fetch(...a),
     sleepFn,
@@ -63,56 +66,77 @@ export async function uploadFile(
       throw err; // network failure: the caller decides whether to retry
     }
   };
-
-  // 1. announce
-  checkAbort();
-  let created;
-  try {
-    const res = await send("/api/uploads", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ kind, filename: file.name, size: file.size }),
-    });
-    const body = await readJson(res);
-    if (!res.ok) throw new UploadError(`HTTP ${res.status}`, { status: res.status, detail: detailOf(body) });
-    created = body;
-  } catch (err) {
-    if (err instanceof UploadError || err?.name === "AbortError") throw err;
-    throw new UploadError("network", { status: 0 });
-  }
-
-  const id = created.id;
-  const base = `/api/uploads/${encodeURIComponent(id)}`;
   const size = file.size;
+  let id = null;
+
+  const create = async () => {
+    try {
+      const res = await send("/api/uploads", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind, filename: file.name, size }),
+      });
+      const body = await readJson(res);
+      if (!res.ok) throw new UploadError(`HTTP ${res.status}`, { status: res.status, detail: detailOf(body) });
+      return body;
+    } catch (err) {
+      if (err instanceof UploadError || err?.name === "AbortError") throw err;
+      throw new UploadError("network", { status: 0 });
+    }
+  };
+
+  // 1. announce a new upload, or pick up an unfinished one.
+  checkAbort();
+  let created = null;
+  if (resumeId) {
+    try {
+      const res = await send(`/api/uploads/${encodeURIComponent(resumeId)}`, { method: "GET" });
+      const body = await readJson(res);
+      if (res.ok && Number.isFinite(body?.received) && (body.size === undefined || body.size === size)) {
+        created = { id: resumeId, received: body.received };
+      } else if (res.status !== 404 && res.status !== 200) {
+        throw new UploadError(`HTTP ${res.status}`, { status: res.status, detail: detailOf(body), uploadId: resumeId });
+      } // 404 (gone) or another file's upload: start afresh below
+    } catch (err) {
+      if (err instanceof UploadError || err?.name === "AbortError") throw err;
+      throw new UploadError("network", { status: 0, uploadId: resumeId });
+    }
+  }
+  if (!created) created = await create();
+
+  id = created.id;
+  onUploadId?.(id);
+  const base = `/api/uploads/${encodeURIComponent(id)}`;
   let received = Number(created.received) || 0;
-  let failures = 0;
+  let failures = 0; // consecutive failed retry cycles
 
   const report = () => {
     if (onProgress) onProgress(size > 0 ? Math.min(1, received / size) : 1);
   };
   if (received > 0) report();
 
-  // A transient failure: count it, give up after maxRetries in a row.
+  // One strike per retry cycle (failed request + the status check that follows).
   const fail = (status, detail) => {
     failures++;
-    if (onRetry && failures < maxRetries) onRetry(failures);
     if (failures >= maxRetries) {
-      throw new UploadError(status ? `HTTP ${status}` : "network", { status, detail });
+      throw new UploadError(status ? `HTTP ${status}` : "network", { status, detail, uploadId: id });
     }
+    onRetry?.(failures);
   };
+  // 1 s, 2 s, 4 s, ... (backoffMs is the base).
+  const backoff = () => sleep(backoffMs * 2 ** (failures - 1));
 
-  // Ask the server where it is; a failure here simply counts as another strike.
+  // Ask the server where it is. Not a strike of its own: if the network is
+  // still down the next request fails and counts then.
   const resync = async () => {
-    await sleep(backoffMs);
+    await backoff();
     try {
       const res = await send(base, { method: "GET" });
       const body = await readJson(res);
-      if (res.status === 404) throw new UploadError("HTTP 404", { status: 404, detail: detailOf(body) });
+      if (res.status === 404) throw new UploadError("HTTP 404", { status: 404, detail: detailOf(body), uploadId: id });
       if (res.ok && Number.isFinite(body?.received)) received = body.received;
-      else fail(res.status, detailOf(body));
     } catch (err) {
       if (err instanceof UploadError || err?.name === "AbortError") throw err;
-      fail(0, null);
     }
   };
 
@@ -146,7 +170,7 @@ export async function uploadFile(
         fail(res.status, detailOf(body));
         await resync();
       } else {
-        throw new UploadError(`HTTP ${res.status}`, { status: res.status, detail: detailOf(body) });
+        throw new UploadError(`HTTP ${res.status}`, { status: res.status, detail: detailOf(body), uploadId: id });
       }
       continue;
     }
@@ -157,7 +181,7 @@ export async function uploadFile(
     } catch (err) {
       if (err?.name === "AbortError") throw err;
       fail(0, null);
-      await sleep(backoffMs);
+      await backoff();
       continue;
     }
     const body = await readJson(res);
@@ -167,9 +191,9 @@ export async function uploadFile(
       await resync();
     } else if (res.status >= 500) {
       fail(res.status, detailOf(body));
-      await sleep(backoffMs);
+      await backoff();
     } else {
-      throw new UploadError(`HTTP ${res.status}`, { status: res.status, detail: detailOf(body) });
+      throw new UploadError(`HTTP ${res.status}`, { status: res.status, detail: detailOf(body), uploadId: id });
     }
   }
 }
