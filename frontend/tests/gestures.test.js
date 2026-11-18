@@ -31,6 +31,9 @@ function makeClock() {
       }
       now = target;
     },
+    get pending() {
+      return timers.size;
+    },
     get now() {
       return now;
     },
@@ -155,4 +158,29 @@ test("a custom windowMs is honoured", () => {
   assert.deepEqual(seeks, [10]);
   clock.advance(1000);
   assert.equal(toggles(), 0);
+});
+
+test("cancel() drops a pending single tap so onToggle never fires", () => {
+  const { clock, seeks, tap, toggles } = setup();
+  tap({ x: 900 });
+  tap.cancel();
+  clock.advance(1000);
+  assert.equal(toggles(), 0);
+  assert.deepEqual(seeks, []);
+  assert.equal(clock.pending, 0);
+});
+
+test("cancel() after a seek burst leaves no pending timer and resets state", () => {
+  const { clock, seeks, tap, toggles } = setup();
+  tap({ x: 900 });
+  clock.advance(100);
+  tap({ x: 900 });
+  assert.equal(clock.pending, 1);
+  tap.cancel();
+  assert.equal(clock.pending, 0);
+  // state reset: the next tap starts a new sequence (toggle, not seek)
+  tap({ x: 900 });
+  clock.advance(400);
+  assert.deepEqual(seeks, [10]);
+  assert.equal(toggles(), 1);
 });

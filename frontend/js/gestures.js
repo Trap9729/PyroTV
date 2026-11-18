@@ -27,7 +27,7 @@ export function createDoubleTap({
     }, windowMs);
   }
 
-  return function tap({ x }) {
+  function tap({ x }) {
     if (timer === null) {
       // First tap of a new sequence: wait to see whether a second one follows.
       arm(() => onToggle());
@@ -36,5 +36,13 @@ export function createDoubleTap({
     // Inside a window: seek, and keep the burst alive (its timer expiry is a no-op).
     arm(() => {});
     onSeek(x < getWidth() / 2 ? -SEEK_STEP : SEEK_STEP);
+  }
+
+  // Drop any pending timer and reset (view teardown).
+  tap.cancel = () => {
+    if (timer !== null) clearTimer(timer);
+    timer = null;
   };
+
+  return tap;
 }

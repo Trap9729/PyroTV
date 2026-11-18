@@ -2,6 +2,7 @@ import { play, playerPause, playerSeek, playerStop, recordView } from "../api.js
 import { el, icon } from "../dom.js";
 import { createDoubleTap, SEEK_STEP } from "../gestures.js";
 import { t } from "../i18n.js";
+import { shouldLeaveOnStopped } from "./player-logic.js";
 import { showToast } from "../toast.js";
 import { renderGrid } from "./grid.js";
 
@@ -30,7 +31,10 @@ export function renderPlayer(root, ctx, key) {
   let disposed = false;
   let inner = null;
 
+  let left = false;
   function leave(notice) {
+    if (left) return;
+    left = true;
     if (ctx.nowPlaying?.key === key) ctx.nowPlaying = null;
     if (notice) showToast(notice);
     ctx.navigate({ name: "grid" });
@@ -118,6 +122,7 @@ function renderLocalMode(root, np, leave) {
   let lastTap = { x: 0, y: 0 };
   let shownElapsed = "";
   let shownTotal = "";
+  const timers = new Set(); // ripple fallbacks; cleared on teardown
 
   const stageWidth = () => stage.clientWidth || window.innerWidth;
 
@@ -176,7 +181,11 @@ function renderLocalMode(root, np, leave) {
     fx.append(r);
     const done = () => r.remove();
     r.addEventListener("animationend", done, { once: true });
-    setTimeout(done, RIPPLE_MS + 200); // fallback if animations are disabled
+    const fallback = setTimeout(() => {
+      timers.delete(fallback);
+      done();
+    }, RIPPLE_MS + 200); // fallback if animations are disabled
+    timers.add(fallback);
   }
 
   function showLabel(delta) {
@@ -326,6 +335,9 @@ function renderLocalMode(root, np, leave) {
     ac.abort();
     clearTimeout(hideTimer);
     clearTimeout(labelTimer);
+    tap.cancel();
+    for (const id of timers) clearTimeout(id);
+    timers.clear();
     // Release the decoder and its buffers; this runs on a kiosk for days on 1 GB.
     video.pause();
     video.removeAttribute("src");
@@ -405,7 +417,9 @@ function renderTvMode(root, ctx, np, leave) {
     fill.style.transform = `scaleX(${dur > 0 ? Math.min(1, pos / dur) : 0})`;
   });
   const unsubStopped = ctx.subscribe("stopped", (ev) => {
-    leave(ev.reason === "tv_disconnected" ? t("player.tvDisconnected") : undefined);
+    // Checked when the event arrives: a newer playback may have superseded this view.
+    const d = shouldLeaveOnStopped({ viewKey: np.key, nowPlayingKey: ctx.nowPlaying?.key, reason: ev.reason });
+    if (d.leave) leave(d.notice ?? undefined);
   });
 
   return () => {
