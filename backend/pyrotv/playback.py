@@ -41,8 +41,21 @@ class PlaybackService:
         self._poll_interval = poll_interval
         self._run = run
         self._tv_key: str | None = None
+        self._lock = asyncio.Lock()
 
     async def start(self, key: str) -> PlayStart:
+        async with self._lock:
+            return await self._start_locked(key)
+
+    async def command(self, cmd: Literal["seek", "pause", "stop"], delta: float = 0) -> None:
+        async with self._lock:
+            await self._command_locked(cmd, delta)
+
+    async def poll_once(self) -> None:
+        async with self._lock:
+            await self._poll_locked()
+
+    async def _start_locked(self, key: str) -> PlayStart:
         piece = self._library.get(key)
         if piece is None or piece.video is None:
             raise KeyError(key)
@@ -57,7 +70,7 @@ class PlaybackService:
         apply_audio(False, self._cfg, self._run)
         return PlayStart(mode="local", title=piece.name, key=key)
 
-    async def command(self, cmd: Literal["seek", "pause", "stop"], delta: float = 0) -> None:
+    async def _command_locked(self, cmd: str, delta: float) -> None:
         if self._tv_key is None:
             return
         if cmd == "seek":
@@ -69,7 +82,7 @@ class PlaybackService:
             self._tv_key = None
             self._bus.publish({"type": "stopped", "reason": "user"})
 
-    async def poll_once(self) -> None:
+    async def _poll_locked(self) -> None:
         if self._tv_key is None:
             return
         if not self._outputs.connected:

@@ -187,3 +187,44 @@ async def test_run_survives_poll_exception(env):
 async def _until(pred):
     while not pred():
         await asyncio.sleep(0.001)
+
+
+class SlowSwitchPlayer(FakePlayer):
+    """Like MpvPlayer.play: stop the old process, yield, then start the new one."""
+
+    async def play(self, path):
+        await self.stop()
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        await super().play(path)
+
+    async def stop(self):
+        await super().stop()
+        await asyncio.sleep(0)
+
+
+@pytest.fixture
+def slow_env(env):
+    svc, outputs, _player, q, calls = env
+    svc._library._p["a-y"] = Piece("a-y", "Y", "a", "cat", Path("y.mp4"), None)
+    player = SlowSwitchPlayer(duration=10.0)
+    svc._player = player
+    outputs.connected = True
+    return svc, player, q
+
+
+async def test_tile_switch_not_seen_as_ended_by_poll(slow_env):
+    svc, player, q = slow_env
+    await svc.start("a-x")
+    await asyncio.gather(svc.start("a-y"), svc.poll_once())
+    assert [e for e in drain(q) if e["type"] == "stopped"] == []
+    assert svc._tv_key == "a-y"
+    assert (await player.status()).state == "playing"
+
+
+async def test_stop_racing_poll_publishes_one_stopped(slow_env):
+    svc, player, q = slow_env
+    await svc.start("a-x")
+    await asyncio.gather(svc.command("stop"), svc.poll_once())
+    stopped = [e for e in drain(q) if e["type"] == "stopped"]
+    assert stopped == [{"type": "stopped", "reason": "user"}]
