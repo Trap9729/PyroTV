@@ -47,10 +47,12 @@ class Library:
         rows = self._store.list_custom_pieces()
         pieces: list[Piece] = []
         for row in rows:
-            video = cfg.custom_videos / f"{row.id}.mp4"
+            video = cfg.custom_videos / row.video_file
             if not video.is_file():
                 continue
-            image = cfg.custom_images / f"{row.id}.jpg"
+            image = cfg.custom_images / row.image_file if row.image_file else None
+            if image is not None and not image.is_file():
+                image = None
             pieces.append(
                 Piece(
                     key=make_key(row.manufacturer_id, row.name),
@@ -58,7 +60,7 @@ class Library:
                     manufacturer_id=row.manufacturer_id,
                     category=row.category,
                     video=video,
-                    image=image if image.is_file() else None,
+                    image=image,
                     custom=True,
                 )
             )

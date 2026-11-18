@@ -104,8 +104,8 @@ def test_get_ignores_visibility(env):
 def test_custom_under_builtin(env, tmp_path):
     cfg, _, store, lib = env
     store.set_enabled_manufacturers({"b"})
-    rid = store.add_custom_piece("a", "Min raket", "Raketer", f"x.mp4", None)
-    (cfg.custom_videos / f"{rid}.mp4").write_bytes(b"x")
+    store.add_custom_piece("a", "Min raket", "Raketer", "abc.mp4", "abc.jpg")
+    (cfg.custom_videos / "abc.mp4").write_bytes(b"x")
     lib.reload_custom()
     assert [p.name for p in lib.list()] == ["Örn"]  # a not enabled
     store.set_enabled_manufacturers({"a"})
@@ -113,10 +113,10 @@ def test_custom_under_builtin(env, tmp_path):
     mine = [p for p in views if p.name == "Min raket"][0]
     assert mine.custom is True and mine.has_image is False
     p = lib.get(make_key("a", "Min raket"))
-    assert p.video == cfg.custom_videos / f"{rid}.mp4" and p.image is None
-    (cfg.custom_images / f"{rid}.jpg").write_bytes(b"x")
+    assert p.video == cfg.custom_videos / "abc.mp4" and p.image is None  # image file absent
+    (cfg.custom_images / "abc.jpg").write_bytes(b"x")
     lib.reload_custom()
-    assert lib.get(make_key("a", "Min raket")).image == cfg.custom_images / f"{rid}.jpg"
+    assert lib.get(make_key("a", "Min raket")).image == cfg.custom_images / "abc.jpg"
     a = [m for m in lib.manufacturers() if m.id == "a"][0]
     assert a.categories == ("Batterier", "Tårtor", "Raketer")
 
@@ -124,9 +124,9 @@ def test_custom_under_builtin(env, tmp_path):
 def test_custom_manufacturer(env):
     cfg, _, store, lib = env
     mid = store.add_custom_manufacturer("Egen")
-    rid = store.add_custom_piece(mid, "Smäll", "Övrigt", "x.mp4", None)
+    store.add_custom_piece(mid, "Smäll", "Övrigt", "x.mp4", None)
     store.add_custom_piece(mid, "Ingen video", "Övrigt", "y.mp4", None)
-    (cfg.custom_videos / f"{rid}.mp4").write_bytes(b"x")
+    (cfg.custom_videos / "x.mp4").write_bytes(b"x")
     lib.reload_custom()
     mans = lib.manufacturers()
     assert [m.id for m in mans] == ["a", "b", mid]

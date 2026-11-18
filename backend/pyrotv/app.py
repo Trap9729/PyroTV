@@ -7,7 +7,8 @@ import logging
 import unicodedata
 from contextlib import asynccontextmanager
 from dataclasses import asdict
-from typing import AsyncIterator, Literal
+from pathlib import Path
+from typing import AsyncIterator, Callable, Literal
 from urllib.parse import quote
 
 from fastapi import APIRouter, FastAPI, HTTPException, Request, Response
@@ -18,6 +19,7 @@ from typing_extensions import Annotated
 
 from .catalogue import Catalogue, CatalogueError, load_catalogue
 from .config import Config
+from .customs import CustomService, DuplicateName, UnknownManufacturer, cleanup_custom_orphans
 from .events import EventBus
 from .library import Library
 from .network import is_allowed_client
@@ -26,10 +28,12 @@ from .playback import PlaybackService
 from .player import FakePlayer, MpvPlayer, Player
 from .store import Store
 from .thumbs import ensure_thumb
+from .uploads import DiskFull, IncompleteUpload, OffsetMismatch, UploadManager
 
 log = logging.getLogger(__name__)
 
 VIEWS_FLUSH_SECONDS = 120.0
+MAX_CHUNK_BYTES = 16 * 1024 * 1024
 
 
 class ClientGuard:
@@ -99,6 +103,26 @@ class PlayBody(BaseModel):
 
 class SeekBody(BaseModel):
     delta: float
+
+
+class UploadBody(BaseModel):
+    kind: Literal["video", "image"]
+    filename: str = Field(min_length=1, max_length=255)
+    size: int
+
+
+class CustomBody(BaseModel):
+    manufacturer_id: str | None = None
+    new_manufacturer_name: str | None = Field(default=None, max_length=200)
+    name: str = Field(max_length=200)
+    category: str = Field(max_length=200)
+    video_upload_id: str = Field(max_length=64)
+    image_upload_id: str | None = Field(default=None, max_length=64)
+
+
+class CustomPatchBody(BaseModel):
+    name: str = Field(max_length=200)
+    category: str = Field(max_length=200)
 
 
 # helpers
@@ -285,14 +309,135 @@ def _playback_router() -> APIRouter:
     return r
 
 
+def _uploads_router() -> APIRouter:
+    r = APIRouter()
+
+    @r.post("/api/uploads")
+    def create_upload(body: UploadBody, request: Request) -> dict:
+        try:
+            info = request.app.state.uploads.create(body.kind, body.filename, body.size)
+        except DiskFull:
+            raise HTTPException(507, "not enough free disk space") from None
+        except ValueError as e:
+            raise HTTPException(413 if "size" in str(e) else 415, str(e)) from None
+        return asdict(info)
+
+    @r.get("/api/uploads/{upload_id}")
+    def get_upload(upload_id: str, request: Request) -> dict:
+        try:
+            return asdict(request.app.state.uploads.status(upload_id))
+        except KeyError:
+            raise HTTPException(404, "unknown upload") from None
+
+    @r.put("/api/uploads/{upload_id}")
+    async def put_chunk(upload_id: str, offset: int, request: Request):
+        declared = request.headers.get("content-length")
+        if declared and declared.isdigit() and int(declared) > MAX_CHUNK_BYTES:
+            raise HTTPException(413, "chunk too large")
+        buf = bytearray()
+        async for part in request.stream():
+            buf += part
+            if len(buf) > MAX_CHUNK_BYTES:
+                raise HTTPException(413, "chunk too large")
+        try:
+            received = await asyncio.to_thread(
+                request.app.state.uploads.write_chunk, upload_id, offset, bytes(buf)
+            )
+        except KeyError:
+            raise HTTPException(404, "unknown upload") from None
+        except OffsetMismatch as e:
+            return JSONResponse({"received": e.received}, status_code=409)
+        except ValueError as e:
+            raise HTTPException(413, str(e)) from None
+        return {"received": received}
+
+    @r.post("/api/uploads/{upload_id}/finish")
+    def finish_upload(upload_id: str, request: Request):
+        uploads = request.app.state.uploads
+        try:
+            uploads.finish(upload_id)
+            info = uploads.status(upload_id)
+        except KeyError:
+            raise HTTPException(404, "unknown upload") from None
+        except IncompleteUpload as e:
+            return JSONResponse({"received": e.received, "size": e.size}, status_code=409)
+        return {"received": info.received, "size": info.size}
+
+    return r
+
+
+def _custom_router() -> APIRouter:
+    r = APIRouter()
+
+    @r.post("/api/custom", status_code=202)
+    def create_custom(body: CustomBody, request: Request) -> dict:
+        try:
+            job_id = request.app.state.customs.create(
+                body.manufacturer_id,
+                body.new_manufacturer_name,
+                body.name,
+                body.category,
+                body.video_upload_id,
+                body.image_upload_id,
+            )
+        except DuplicateName:
+            raise HTTPException(409, "a piece with that name already exists") from None
+        except UnknownManufacturer:
+            raise HTTPException(404, "unknown manufacturer") from None
+        except KeyError:
+            raise HTTPException(404, "unknown upload") from None
+        except IncompleteUpload:
+            raise HTTPException(409, "upload is incomplete") from None
+        except ValueError as e:
+            raise HTTPException(422, str(e)) from None
+        return {"job_id": job_id}
+
+    @r.get("/api/custom/jobs/{job_id}")
+    def get_job(job_id: str, request: Request) -> dict:
+        try:
+            return request.app.state.customs.job(job_id)
+        except KeyError:
+            raise HTTPException(404, "unknown job") from None
+
+    @r.get("/api/custom")
+    def list_custom(request: Request) -> list[dict]:
+        return request.app.state.customs.list()
+
+    @r.patch("/api/custom/{piece_id}")
+    def patch_custom(piece_id: int, body: CustomPatchBody, request: Request) -> dict:
+        try:
+            request.app.state.customs.update(piece_id, body.name, body.category)
+        except KeyError:
+            raise HTTPException(404, "unknown custom piece") from None
+        except DuplicateName:
+            raise HTTPException(409, "a piece with that name already exists") from None
+        except ValueError as e:
+            raise HTTPException(422, str(e)) from None
+        return {"id": piece_id}
+
+    @r.delete("/api/custom/{piece_id}", status_code=204)
+    def delete_custom(piece_id: int, request: Request) -> Response:
+        request.app.state.customs.delete(piece_id)
+        return Response(status_code=204)
+
+    return r
+
+
 def create_app(
-    cfg: Config, *, player: Player | None = None, watcher_interval: float = 2.0
+    cfg: Config,
+    *,
+    player: Player | None = None,
+    watcher_interval: float = 2.0,
+    custom_process: tuple[Callable[[Path, Path], None], Callable[[Path, Path], None]] | None = None,
 ) -> FastAPI:
+    """`custom_process=(process_video, process_image)` replaces the ffmpeg/Pillow
+    pipeline of CustomService (test seam; production leaves it None)."""
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         cfg.ensure_dirs()
         store = Store(cfg.db_path)
         tasks: list[asyncio.Task] = []
+        customs: CustomService | None = None
         try:
             catalogue_error: str | None = None
             try:
@@ -301,7 +446,15 @@ def create_app(
                 log.error("catalogue unavailable: %s", e)
                 catalogue_error = str(e)
                 catalogue = Catalogue([], [], [])
+            removed = cleanup_custom_orphans(cfg, store)
+            if removed:
+                log.info("boot cleanup removed %d stale file(s)", removed)
             library = Library(cfg, catalogue, store)
+            uploads = UploadManager(cfg)
+            proc = {}
+            if custom_process is not None:
+                proc = {"process_video": custom_process[0], "process_image": custom_process[1]}
+            customs = CustomService(cfg, store, library, uploads, **proc)
             bus = EventBus()
             outputs = OutputWatcher(cfg, bus, watcher_interval)
             pl = player or (FakePlayer() if cfg.fake_hw else MpvPlayer(cfg))
@@ -310,6 +463,7 @@ def create_app(
             s = app.state
             s.cfg, s.store, s.catalogue, s.catalogue_error = cfg, store, catalogue, catalogue_error
             s.library, s.bus, s.outputs, s.player, s.playback = library, bus, outputs, pl, playback
+            s.uploads, s.customs = uploads, customs
 
             tasks = [
                 asyncio.create_task(outputs.run(), name="outputs"),
@@ -324,6 +478,8 @@ def create_app(
                 with contextlib.suppress(asyncio.CancelledError):
                     await t
             try:
+                if customs is not None:
+                    await asyncio.to_thread(customs.close)
                 store.flush_views()
             finally:
                 store.close()
@@ -334,6 +490,8 @@ def create_app(
     app.include_router(_library_router())
     app.include_router(_media_router())
     app.include_router(_playback_router())
+    app.include_router(_uploads_router())
+    app.include_router(_custom_router())
     # Later tasks: include their routers here, before the static mount.
     if cfg.static_dir.is_dir():
         app.mount("/", StaticFiles(directory=cfg.static_dir, html=True), name="static")
