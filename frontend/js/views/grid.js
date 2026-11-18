@@ -1,27 +1,12 @@
 import { getCategories, getPieces, play, thumbUrl } from "../api.js";
+import { el, icon } from "../dom.js";
 import { t } from "../i18n.js";
+import { showToast } from "../toast.js";
 
 const SEARCH_DEBOUNCE_MS = 200;
 
 // Remembered across visits so returning from the player keeps the filter and scroll.
 const memory = { chip: "all", q: "", scrollTop: 0 };
-
-function el(tag, className, text) {
-  const n = document.createElement(tag);
-  if (className) n.className = className;
-  if (text !== undefined) n.textContent = text;
-  return n;
-}
-
-function icon(id, className = "icon") {
-  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svg.setAttribute("class", className);
-  svg.setAttribute("aria-hidden", "true");
-  const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
-  use.setAttribute("href", `#${id}`);
-  svg.append(use);
-  return svg;
-}
 
 function chipQuery(chip) {
   if (chip === "popular") return { sort: "views" };
@@ -33,7 +18,6 @@ export function renderGrid(root, ctx) {
   let disposed = false;
   let requestSeq = 0;
   let debounceTimer = null;
-  let toastTimer = null;
   let busy = false; // a play() is in flight
   let categories = [];
   let categoriesLoaded = false;
@@ -86,10 +70,7 @@ export function renderGrid(root, ctx) {
   empty.hidden = true;
   scroller.append(tiles, empty);
 
-  const toast = el("div", "toast");
-  toast.setAttribute("role", "status");
-
-  view.append(top, chipsBar, scroller, toast);
+  view.append(top, chipsBar, scroller);
   root.append(view);
 
   // ---- helpers ----
@@ -98,13 +79,6 @@ export function renderGrid(root, ctx) {
   }
   function updateClear() {
     clear.classList.toggle("visible", input.value.length > 0);
-  }
-
-  function showToast(msg) {
-    toast.textContent = msg;
-    toast.classList.add("show");
-    clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => toast.classList.remove("show"), 3200);
   }
 
   function renderChips() {
@@ -302,7 +276,6 @@ export function renderGrid(root, ctx) {
   return () => {
     disposed = true;
     clearTimeout(debounceTimer);
-    clearTimeout(toastTimer);
     unsubTv();
     unsubState();
   };

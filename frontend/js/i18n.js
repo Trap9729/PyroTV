@@ -23,6 +23,18 @@ export const sv = {
   "grid.loadError": "Kunde inte hämta fyrverkerierna. Försök igen.",
   "grid.playError": "Kunde inte starta filmen. Försök igen.",
 
+  "player.exit": "Avsluta filmen",
+  "player.play": "Spela",
+  "player.pause": "Pausa",
+  "player.seekLabel": "{value} s",
+  "player.seekBack": "Spola tillbaka 10 sekunder",
+  "player.seekForward": "Spola framåt 10 sekunder",
+  "player.seekBar": "Position i filmen",
+  "player.tvHint": "Spelas på TV:n",
+  "player.tvDisconnected": "TV:n kopplades från",
+  "player.commandError": "Kunde inte styra TV:n. Försök igen.",
+  "player.videoError": "Filmen kunde inte spelas upp.",
+
   "stub.soon": "Kommer snart",
   "stub.wizard": "Kom igång",
 };
