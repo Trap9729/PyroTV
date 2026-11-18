@@ -1,8 +1,8 @@
 """Generate sample fireworks media and the sample catalogue.
 
-Usage: python tools/make_sample_media.py [OUT_DIR] [--catalogue PATH]
+Usage: python tools/make_sample_media.py [OUT_DIR] [--catalogue PATH] [--duration SECONDS]
 
-Writes OUT_DIR/videos/<name>.mp4 (10 s, 1080p30, H.264) and
+Writes OUT_DIR/videos/<name>.mp4 (10 s by default, 1080p30, H.264) and
 OUT_DIR/images/<name>.jpg, plus catalogue/catalogue.json.
 ffmpeg is resolved from $FFMPEG, then PATH, then imageio-ffmpeg.
 """
@@ -97,7 +97,9 @@ def _draw_card(name: str, size: tuple[int, int], bg: tuple[int, int, int], font_
     return img
 
 
-def make_video(ffmpeg: str, name: str, bg: tuple[int, int, int], out: Path) -> None:
+def make_video(
+    ffmpeg: str, name: str, bg: tuple[int, int, int], out: Path, duration: float = 10
+) -> None:
     with tempfile.TemporaryDirectory() as tmp:
         frame = Path(tmp) / "frame.png"
         _draw_card(name, (1920, 1080), bg, 140).save(frame)
@@ -105,7 +107,7 @@ def make_video(ffmpeg: str, name: str, bg: tuple[int, int, int], out: Path) -> N
             ffmpeg, "-y", "-loglevel", "error",
             "-loop", "1", "-framerate", "30", "-i", str(frame),
             "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
-            "-t", "10", "-c:v", "libx264", "-preset", "ultrafast", "-tune", "stillimage",
+            "-t", str(duration), "-c:v", "libx264", "-preset", "ultrafast", "-tune", "stillimage",
             "-pix_fmt", "yuv420p", "-r", "30", "-c:a", "aac", "-b:a", "32k",
             "-movflags", "+faststart", "-shortest", str(out),
         ]
@@ -120,6 +122,7 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("out_dir", nargs="?", default="sample_data", type=Path)
     ap.add_argument("--catalogue", type=Path, default=REPO_ROOT / "catalogue" / "catalogue.json")
+    ap.add_argument("--duration", type=float, default=10, help="video length in seconds (default 10)")
     args = ap.parse_args(argv)
 
     ffmpeg = find_ffmpeg()
@@ -135,7 +138,7 @@ def main(argv: list[str] | None = None) -> int:
     ]
     for i, name in enumerate(names):
         print(f"[{i + 1}/{len(names)}] {name}", flush=True)
-        make_video(ffmpeg, name, _colour(i, len(names), dark=True), videos / f"{name}.mp4")
+        make_video(ffmpeg, name, _colour(i, len(names), dark=True), videos / f"{name}.mp4", args.duration)
         make_image(name, _colour(i, len(names), dark=False), images / f"{name}.jpg")
 
     args.catalogue.parent.mkdir(parents=True, exist_ok=True)

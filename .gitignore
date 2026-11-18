@@ -9,3 +9,6 @@ node_modules/
 *.egg-info/
 VIDEOS/
 dev_data/
+e2e/node_modules/
+e2e/test-results/
+e2e/playwright-report/
