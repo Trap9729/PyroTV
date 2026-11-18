@@ -8,6 +8,3 @@ node_modules/
 .claude-flow/
 *.egg-info/
 VIDEOS/
-[INFO] Recording command outcome: echo
-
-[OK] Command outcome recorded
