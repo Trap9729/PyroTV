@@ -1,0 +1,75 @@
+{
+  "version": 1,
+  "manufacturers": [
+    {
+      "id": "lesli",
+      "name": "Lesli",
+      "categories": [
+        "Tårtor",
+        "Singelskott",
+        "Raketer"
+      ],
+      "pieces": [
+        {
+          "name": "Åska 49",
+          "category": "Tårtor"
+        },
+        {
+          "name": "Sprakande Örn",
+          "category": "Tårtor"
+        },
+        {
+          "name": "Ärta 25 skott",
+          "category": "Tårtor"
+        },
+        {
+          "name": "Blå Måne",
+          "category": "Singelskott"
+        },
+        {
+          "name": "Röd Drake",
+          "category": "Singelskott"
+        },
+        {
+          "name": "Himmelsstormare 3",
+          "category": "Raketer"
+        }
+      ]
+    },
+    {
+      "id": "nico",
+      "name": "Nico",
+      "categories": [
+        "Tårtor",
+        "Singelskott",
+        "Raketer"
+      ],
+      "pieces": [
+        {
+          "name": "Gyllene Regn 100",
+          "category": "Tårtor"
+        },
+        {
+          "name": "Älvdans",
+          "category": "Tårtor"
+        },
+        {
+          "name": "Öga för Öga 16",
+          "category": "Singelskott"
+        },
+        {
+          "name": "Vit Stjärna",
+          "category": "Singelskott"
+        },
+        {
+          "name": "Raket Åttan",
+          "category": "Raketer"
+        },
+        {
+          "name": "Sköna Maj 8",
+          "category": "Raketer"
+        }
+      ]
+    }
+  ]
+}
