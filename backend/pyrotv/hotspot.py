@@ -95,13 +95,16 @@ class Hotspot:
             self._is_up = True
             self._up_since = self._now()
 
+    def _down_locked(self) -> None:
+        rc = self._run(["nmcli", "con", "down", CONNECTION])
+        if rc != 0:
+            log.warning("nmcli con down exited with %s", rc)
+        self._pin = None
+        self._is_up = False
+
     def down(self) -> None:
         with self._lock:
-            rc = self._run(["nmcli", "con", "down", CONNECTION])
-            if rc != 0:
-                log.warning("nmcli con down exited with %s", rc)
-            self._pin = None
-            self._is_up = False
+            self._down_locked()
 
     def qr_svg(self) -> str | None:
         pin = self.pin
@@ -117,16 +120,20 @@ class Hotspot:
         except (TypeError, ValueError):
             return DEFAULT_AUTOOFF_MINUTES
 
-    async def autooff_tick(self) -> bool:
+    def _autooff_check_and_down(self) -> bool:
+        """Blocking: check and (if due) switch off under one lock acquisition."""
         with self._lock:
-            up, since = self._is_up, self._up_since
-        if not up:
-            return False
-        minutes = self._autooff_minutes()
-        if minutes <= 0 or self._now() - since < minutes * 60:
-            return False
-        await asyncio.to_thread(self.down)
-        return True
+            if not self._is_up:
+                return False
+            minutes = self._autooff_minutes()
+            if minutes <= 0 or self._now() - self._up_since < minutes * 60:
+                return False
+            self._down_locked()
+            return True
+
+    async def autooff_tick(self) -> bool:
+        # The lock may be held across slow nmcli calls: never take it on the loop.
+        return await asyncio.to_thread(self._autooff_check_and_down)
 
     async def run_autooff(self, interval: float = 30.0) -> None:
         while True:

@@ -158,6 +158,36 @@ async def test_autooff_zero_never(cfg, store):
     assert calls == [] and h.is_up
 
 
+async def test_autooff_tick_does_not_block_event_loop(cfg, store):
+    h, _ = make(cfg, store)
+    h.up()
+    h._lock.acquire()  # simulate up() stuck in a slow nmcli call
+    try:
+        tick = asyncio.create_task(h.autooff_tick())
+        flag = []
+
+        async def other():
+            await asyncio.sleep(0.05)
+            flag.append(1)
+
+        await asyncio.wait_for(other(), timeout=2)
+        assert flag == [1] and not tick.done()
+    finally:
+        h._lock.release()
+    assert await asyncio.wait_for(tick, timeout=2) is False
+
+
+async def test_autooff_tick_sees_new_up_since_after_reapply(cfg, store):
+    clock = Clock()
+    h, calls = make(cfg, store, now=clock)
+    h.up()
+    clock.t += 31 * 60  # old switch-on is past the limit
+    h.up()  # switched on again: timer restarts
+    calls.clear()
+    assert await h.autooff_tick() is False
+    assert h.is_up and calls == []
+
+
 async def test_run_autooff_loop_cancels(cfg, store):
     h, _ = make(cfg, store)
     t = asyncio.create_task(h.run_autooff(interval=0.01))
