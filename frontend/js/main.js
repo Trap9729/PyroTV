@@ -62,7 +62,12 @@ function render() {
     cleanup = null;
   }
   root.replaceChildren();
-  const route = parseRoute(location.hash);
+  let route = parseRoute(location.hash);
+  // An unfinished setup cannot be bypassed with a manual #/ or #/settings.
+  if (ctx.state && !ctx.state.setup_done && route.name !== "wizard") {
+    history.replaceState(null, "", buildRoute({ name: "wizard" }));
+    route = { name: "wizard" };
+  }
   root.dataset.view = route.name;
   let result;
   switch (route.name) {
