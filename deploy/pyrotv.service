@@ -1,0 +1,52 @@
+# PyroTV backend (FastAPI on port 80).
+#
+# Installed by deploy/install.sh to /etc/systemd/system/pyrotv.service after
+# replacing @PYROTV_UID@ with the numeric uid of user `pyrotv`.
+#
+# It is a SYSTEM service running as the same user as the sway kiosk session
+# (autologin on tty1), so the mpv it spawns can open that session's Wayland
+# socket and PipeWire, and `pactl` talks to the same PipeWire. `loginctl
+# enable-linger pyrotv` makes /run/user/@PYROTV_UID@ and the user's PipeWire
+# exist at boot, before the autologin. The env vars that point there
+# (XDG_RUNTIME_DIR, WAYLAND_DISPLAY, PULSE_SERVER) come from /etc/pyrotv.env.
+
+[Unit]
+Description=PyroTV backend
+# /data is the writable ext4 partition (fstab UUID=... /data -> data.mount).
+# Without it there is nothing to serve: do not start on the read-only root.
+Requires=data.mount
+After=data.mount network.target user@@PYROTV_UID@.service
+Wants=user@@PYROTV_UID@.service
+
+[Service]
+Type=exec
+User=pyrotv
+Group=pyrotv
+EnvironmentFile=/etc/pyrotv.env
+WorkingDirectory=/opt/pyrotv
+# --no-proxy-headers: request.client.host is the access control (loopback and
+# the hotspot subnet only), so X-Forwarded-For must never be trusted.
+ExecStart=/opt/pyrotv/venv/bin/uvicorn pyrotv.main:app --factory --host 0.0.0.0 --port 80 --no-proxy-headers --no-server-header --no-access-log
+Restart=always
+RestartSec=2
+# Port 80 without root.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+
+# Conservative hardening that leaves mpv/Wayland/PipeWire/nmcli working:
+# - /run/user/<uid> (Wayland + PipeWire sockets) is untouched by these.
+# - nmcli talks to NetworkManager over the system D-Bus (polkit rule
+#   50-pyrotv-nm.rules), so no privileges are needed for the hotspot.
+# - ProtectSystem=full makes /usr, /boot and /etc read-only; /data stays
+#   writable (ReadWritePaths is explicit documentation of that).
+# - /dev is NOT made private: mpv needs /dev/dri (groups video/render).
+NoNewPrivileges=true
+ProtectSystem=full
+ReadWritePaths=/data
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+
+[Install]
+WantedBy=multi-user.target
