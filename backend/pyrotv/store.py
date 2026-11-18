@@ -154,6 +154,59 @@ class Store:
             )
         return mid
 
+    def add_custom_piece_with_manufacturer(
+        self,
+        manufacturer_id: str | None,
+        new_manufacturer_name: str | None,
+        name: str,
+        category: str,
+        video_file: str,
+        image_file: str | None,
+    ) -> tuple[int, str]:
+        """Create the manufacturer if needed, enable it and insert the piece atomically."""
+        if (manufacturer_id is None) == (new_manufacturer_name is None):
+            raise ValueError("give exactly one of manufacturer_id and new_manufacturer_name")
+        with self._lock:
+            with self._conn:
+                mid = manufacturer_id
+                if mid is None:
+                    slug = _slug(new_manufacturer_name)
+                    if not slug:
+                        raise ValueError("manufacturer name has no usable characters")
+                    mid = f"c-{slug}"
+                    if self._conn.execute(
+                        "SELECT 1 FROM custom_manufacturers WHERE id=?", (mid,)
+                    ).fetchone():
+                        raise ValueError(f"manufacturer {mid} already exists")
+                    self._conn.execute(
+                        "INSERT INTO custom_manufacturers(id, name) VALUES(?, ?)",
+                        (mid, new_manufacturer_name),
+                    )
+                self._conn.execute(
+                    "INSERT OR IGNORE INTO enabled_manufacturers(id) VALUES(?)", (mid,)
+                )
+                cur = self._conn.execute(
+                    "INSERT INTO custom_pieces"
+                    "(manufacturer_id, name, category, video_file, image_file) "
+                    "VALUES(?, ?, ?, ?, ?)",
+                    (mid, name, category, video_file, image_file),
+                )
+                return int(cur.lastrowid), mid
+
+    def delete_empty_custom_manufacturers(self) -> int:
+        with self._lock, self._conn:
+            ids = [
+                r[0]
+                for r in self._conn.execute(
+                    "SELECT id FROM custom_manufacturers WHERE id NOT IN "
+                    "(SELECT manufacturer_id FROM custom_pieces)"
+                )
+            ]
+            for i in ids:
+                self._conn.execute("DELETE FROM custom_manufacturers WHERE id=?", (i,))
+                self._conn.execute("DELETE FROM enabled_manufacturers WHERE id=?", (i,))
+        return len(ids)
+
     def list_custom_manufacturers(self) -> list[CustomManufacturer]:
         with self._lock:
             rows = self._conn.execute(

@@ -4,6 +4,7 @@ import json
 import os
 import re
 import shutil
+import threading
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -59,6 +60,12 @@ class UploadManager:
     def __init__(self, cfg: Config, free_bytes: Callable[[Path], int] = _default_free) -> None:
         self._cfg = cfg
         self._free = free_bytes
+        self._locks: dict[str, threading.Lock] = {}
+        self._locks_guard = threading.Lock()
+
+    def _lock_for(self, upload_id: str) -> threading.Lock:
+        with self._locks_guard:
+            return self._locks.setdefault(upload_id, threading.Lock())
 
     # paths
     def _check(self, upload_id: str) -> str:
@@ -111,6 +118,11 @@ class UploadManager:
         )
 
     def write_chunk(self, upload_id: str, offset: int, data: bytes) -> int:
+        self._check(upload_id)
+        with self._lock_for(upload_id):
+            return self._write_chunk_locked(upload_id, offset, data)
+
+    def _write_chunk_locked(self, upload_id: str, offset: int, data: bytes) -> int:
         meta, part = self._load(upload_id)
         received = part.stat().st_size
         if offset != received:
@@ -124,6 +136,11 @@ class UploadManager:
         return received + len(data)
 
     def finish(self, upload_id: str) -> Path:
+        self._check(upload_id)
+        with self._lock_for(upload_id):
+            return self._finish_locked(upload_id)
+
+    def _finish_locked(self, upload_id: str) -> Path:
         meta, part = self._load(upload_id)
         received = part.stat().st_size
         if received != meta["size"]:
@@ -137,11 +154,16 @@ class UploadManager:
             self._check(upload_id)
         except KeyError:
             return
-        for p in (self._part(upload_id), self._meta(upload_id)):
-            p.unlink(missing_ok=True)
+        with self._lock_for(upload_id):
+            for p in (self._part(upload_id), self._meta(upload_id)):
+                p.unlink(missing_ok=True)
+        with self._locks_guard:
+            self._locks.pop(upload_id, None)
 
     def cleanup_stale(self) -> int:
         count = 0
+        with self._locks_guard:
+            self._locks.clear()
         d = self._cfg.upload_tmp_dir
         if not d.is_dir():
             return 0

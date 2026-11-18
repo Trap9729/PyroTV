@@ -230,6 +230,7 @@ class CustomService:
         created = [video_dest, video_dest.with_name(video_name + ".part")]
         if image_dest is not None:
             created += [image_dest, image_dest.with_name(image_name + ".part")]
+        committed = False
         try:
             self._process_video(job.video_src, video_dest)
             if image_dest is not None:
@@ -240,24 +241,34 @@ class CustomService:
                     mid = self._manufacturer_name_index().get(_fold(job.new_manufacturer_name or ""))
                 if mid is not None:
                     self._check_duplicate(mid, job.name)
-                if mid is None:
-                    mid = self._store.add_custom_manufacturer(job.new_manufacturer_name or "")
-                self._store.set_enabled_manufacturers(self._store.enabled_manufacturers() | {mid})
-                self._store.add_custom_piece(mid, job.name, job.category, video_name, image_name)
-                self._library.reload_custom()
+                self._store.add_custom_piece_with_manufacturer(
+                    mid,
+                    None if mid is not None else job.new_manufacturer_name,
+                    job.name, job.category, video_name, image_name,
+                )
+                committed = True
+                try:
+                    self._library.reload_custom()
+                except Exception:  # noqa: BLE001 - row is committed; job is done
+                    log.exception("reload_custom failed after commit of job %s", job.id)
         except BaseException:
-            for p in created:
-                p.unlink(missing_ok=True)
+            if not committed:
+                for p in created:
+                    p.unlink(missing_ok=True)
             raise
         finally:
-            self._uploads.discard(job.video_upload_id)
-            if job.image_upload_id:
-                self._uploads.discard(job.image_upload_id)
+            for uid in (job.video_upload_id, job.image_upload_id):
+                if uid:
+                    try:
+                        self._uploads.discard(uid)
+                    except Exception:  # noqa: BLE001
+                        log.exception("upload discard failed for %s", uid)
 
 
 def cleanup_custom_orphans(cfg: Config, store: Store) -> int:
     """Boot cleanup: stale upload temp files, *.part leftovers and unreferenced custom files."""
     removed = UploadManager(cfg).cleanup_stale()
+    removed += store.delete_empty_custom_manufacturers()
     rows = store.list_custom_pieces()
     keep = {
         cfg.custom_videos: {r.video_file for r in rows},

@@ -120,3 +120,43 @@ def test_discard(tmp_path):
     info = m.create("video", "a.mp4", 10)
     m.discard(info.id)
     assert list(cfg.upload_tmp_dir.iterdir()) == []
+
+
+def test_concurrent_same_offset_exactly_one_wins(tmp_path):
+    import threading
+
+    _, m = _mgr(tmp_path)
+    info = m.create("video", "a.mp4", 100)
+    barrier = threading.Barrier(2)
+    results = []
+
+    def go():
+        barrier.wait()
+        try:
+            results.append(m.write_chunk(info.id, 0, b"z" * 60))
+        except OffsetMismatch as e:
+            results.append(e)
+
+    ts = [threading.Thread(target=go) for _ in range(2)]
+    [t.start() for t in ts]
+    [t.join() for t in ts]
+    assert sorted(type(r).__name__ for r in results) == ["OffsetMismatch", "int"]
+    assert m.status(info.id).received == 60
+
+
+def test_concurrent_different_uploads(tmp_path):
+    import threading
+
+    _, m = _mgr(tmp_path)
+    a, b = m.create("video", "a.mp4", 50), m.create("video", "b.mp4", 50)
+    barrier = threading.Barrier(2)
+
+    def go(uid, byte):
+        barrier.wait()
+        m.write_chunk(uid, 0, byte * 50)
+
+    ts = [threading.Thread(target=go, args=(a.id, b"a")), threading.Thread(target=go, args=(b.id, b"b"))]
+    [t.start() for t in ts]
+    [t.join() for t in ts]
+    assert m.finish(a.id).read_bytes() == b"a" * 50
+    assert m.finish(b.id).read_bytes() == b"b" * 50

@@ -248,3 +248,61 @@ def test_cleanup_custom_orphans(env):
     assert sorted(p.name for p in cfg.custom_videos.iterdir()) == [row.video_file]
     assert sorted(p.name for p in cfg.custom_images.iterdir()) == [row.image_file]
     assert list(cfg.upload_tmp_dir.iterdir()) == []
+
+
+def test_failing_piece_insert_leaves_nothing(env, monkeypatch):
+    cfg, store, lib, up, svc = env
+    # force the final INSERT to fail inside the transaction, after manufacturer + enabled rows
+    orig = store._conn
+
+    class Conn:
+        def __getattr__(self, n):
+            return getattr(orig, n)
+
+        def __enter__(self):
+            return orig.__enter__()
+
+        def __exit__(self, *a):
+            return orig.__exit__(*a)
+
+        def execute(self, sql, *a):
+            if sql.startswith("INSERT INTO custom_pieces"):
+                raise RuntimeError("insert failed")
+            return orig.execute(sql, *a)
+
+    monkeypatch.setattr(store, "_conn", Conn())
+    job = create(svc, up, manufacturer_id=None, new_manufacturer_name="Ny")
+    res = wait(svc, job)
+    assert res["state"] == "error"
+    monkeypatch.setattr(store, "_conn", orig)
+    assert store.list_custom_manufacturers() == [] and store.list_custom_pieces() == []
+    assert store.enabled_manufacturers() == {"a"}
+    assert list(cfg.custom_videos.iterdir()) == []
+
+
+def test_reload_failure_after_commit_keeps_files_and_job_done(env, monkeypatch):
+    cfg, store, lib, up, svc = env
+    calls = {"n": 0}
+    orig = lib.reload_custom
+
+    def flaky():
+        calls["n"] += 1
+        raise RuntimeError("reload broke")
+
+    monkeypatch.setattr(lib, "reload_custom", flaky)
+    job = create(svc, up)
+    assert wait(svc, job)["state"] == "done"
+    monkeypatch.setattr(lib, "reload_custom", orig)
+    row = store.list_custom_pieces()[0]
+    assert (cfg.custom_videos / row.video_file).is_file()
+    assert list(cfg.upload_tmp_dir.iterdir()) == []
+
+
+def test_boot_cleanup_removes_empty_custom_manufacturer(env):
+    cfg, store, lib, up, svc = env
+    assert wait(svc, create(svc, up, manufacturer_id=None, new_manufacturer_name="Full"))["state"] == "done"
+    empty = store.add_custom_manufacturer("Tom")
+    store.set_enabled_manufacturers(store.enabled_manufacturers() | {empty})
+    assert cleanup_custom_orphans(cfg, store) >= 1
+    assert [m.id for m in store.list_custom_manufacturers()] == ["c-full"]
+    assert store.enabled_manufacturers() == {"a", "c-full"}
