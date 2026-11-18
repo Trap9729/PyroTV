@@ -217,3 +217,22 @@ async def test_sse_keepalive():
     await gen.__anext__()
     assert await asyncio.wait_for(gen.__anext__(), 1) == ": keepalive\n\n"
     await gen.aclose()
+
+
+def test_nfd_keys_are_normalised(make_client):
+    import unicodedata
+
+    nfd = unicodedata.normalize("NFD", KEY_ASKA)
+    assert nfd != KEY_ASKA
+    enc = quote(nfd, safe="")
+    with make_client(TOUCH) as c:
+        enable_all(c)
+        assert c.get("/api/thumb/" + enc).status_code == 200
+        assert c.get("/media/video/" + enc).status_code == 200
+        assert c.post(f"/api/pieces/{enc}/view").status_code == 204
+        assert c.get("/api/pieces").json()[1]["views"] == 1
+        r = c.post("/api/play", json={"key": nfd})
+        assert r.status_code == 200 and r.json()["key"] == KEY_ASKA
+        r = c.put(f"/api/pieces/{enc}/enabled", json={"enabled": False})
+        assert r.status_code == 200 and r.json()["key"] == KEY_ASKA
+        assert KEY_ASKA not in [p["key"] for p in c.get("/api/pieces").json()]

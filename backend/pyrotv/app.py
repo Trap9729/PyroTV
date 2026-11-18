@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import unicodedata
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from typing import AsyncIterator, Literal
@@ -112,8 +113,13 @@ def _state_json(request: Request) -> dict:
     }
 
 
+def _nfc_key(key: str) -> str:
+    """Piece keys are stored NFC; clients may send other Unicode forms."""
+    return unicodedata.normalize("NFC", key)
+
+
 def _piece_or_404(request: Request, key: str):
-    piece = request.app.state.library.get(key)
+    piece = request.app.state.library.get(_nfc_key(key))
     if piece is None:
         raise HTTPException(404, "unknown piece")
     return piece
@@ -199,13 +205,13 @@ def _library_router() -> APIRouter:
 
     @r.put("/api/pieces/{key:path}/enabled")
     def set_enabled(key: str, body: EnabledBody, request: Request) -> dict:
-        _piece_or_404(request, key)
+        key = _piece_or_404(request, key).key
         request.app.state.store.set_piece_enabled(key, body.enabled)
         return {"key": key, "enabled": body.enabled}
 
     @r.post("/api/pieces/{key:path}/view", status_code=204)
     def add_view(key: str, request: Request) -> Response:
-        _piece_or_404(request, key)
+        key = _piece_or_404(request, key).key
         request.app.state.store.add_view(key)
         return Response(status_code=204)
 
@@ -246,7 +252,7 @@ def _playback_router() -> APIRouter:
     @r.post("/api/play")
     async def play(body: PlayBody, request: Request) -> dict:
         try:
-            start = await request.app.state.playback.start(body.key)
+            start = await request.app.state.playback.start(_nfc_key(body.key))
         except KeyError:
             raise HTTPException(404, "unknown piece") from None
         url = "/media/video/" + quote(start.key, safe="") if start.mode == "local" else None
