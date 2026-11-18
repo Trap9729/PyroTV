@@ -1,0 +1,5 @@
+{
+  "private": true,
+  "type": "module",
+  "description": "PyroTV kiosk frontend (no build step, no dependencies). This file only tells Node that *.js are ES modules for `node --test frontend/tests`."
+}

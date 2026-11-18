@@ -8,3 +8,4 @@ node_modules/
 .claude-flow/
 *.egg-info/
 VIDEOS/
+dev_data/
