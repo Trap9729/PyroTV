@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass
 from typing import Callable, Literal
 
@@ -9,6 +10,8 @@ from .events import EventBus
 from .library import Library
 from .outputs import OutputWatcher, apply_audio, run_command
 from .player import Player
+
+log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -70,10 +73,12 @@ class PlaybackService:
         if self._tv_key is None:
             return
         if not self._outputs.connected:
-            await self._player.stop()
-            apply_audio(False, self._cfg, self._run)
-            self._tv_key = None
-            self._bus.publish({"type": "stopped", "reason": "tv_disconnected"})
+            try:
+                await self._player.stop()
+            finally:
+                apply_audio(False, self._cfg, self._run)
+                self._tv_key = None
+                self._bus.publish({"type": "stopped", "reason": "tv_disconnected"})
             return
         st = await self._player.status()
         if st.state == "idle":
@@ -91,5 +96,8 @@ class PlaybackService:
 
     async def run(self) -> None:
         while True:
-            await self.poll_once()
+            try:
+                await self.poll_once()
+            except Exception:
+                log.exception("playback poll failed")
             await asyncio.sleep(self._poll_interval)

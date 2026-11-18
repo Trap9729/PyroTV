@@ -87,9 +87,15 @@ async def test_mpv_player_ipc(tmp_path):
         writer.close()
 
     cfg = make_cfg(tmp_path)
-    server = await asyncio.start_unix_server(handle, path=str(cfg.mpv_socket))
     proc = DummyProc()
-    player = MpvPlayer(cfg, spawn=lambda args: _async_value(proc))
+    servers = []
+
+    async def spawn(args):
+        # like real mpv, create the IPC socket after launch
+        servers.append(await asyncio.start_unix_server(handle, path=str(cfg.mpv_socket)))
+        return proc
+
+    player = MpvPlayer(cfg, spawn=spawn)
     try:
         await player.play(Path("v.mp4"))
         await player.seek(10)
@@ -98,8 +104,9 @@ async def test_mpv_player_ipc(tmp_path):
         await player.stop()
         assert proc.returncode is not None
     finally:
-        server.close()
-        await server.wait_closed()
+        for server in servers:
+            server.close()
+            await server.wait_closed()
 
 
 async def test_mpv_status_idle_without_process(tmp_path):
@@ -113,3 +120,34 @@ async def test_mpv_status_playing_when_socket_not_ready(tmp_path):
     assert await player.status() == PlayerStatus("playing", 0.0, 0.0)
     await player.stop()
     assert await player.status() == PlayerStatus("idle", 0.0, 0.0)
+
+
+async def test_mpv_concurrent_play_leaves_one_process(tmp_path):
+    procs: list[DummyProc] = []
+
+    async def spawn(args):
+        await asyncio.sleep(0)
+        p = DummyProc()
+        procs.append(p)
+        return p
+
+    player = MpvPlayer(make_cfg(tmp_path), spawn=spawn)
+    await asyncio.gather(player.play(Path("a.mp4")), player.play(Path("b.mp4")))
+    assert len(procs) == 2
+    assert procs[0].returncode is not None
+    assert procs[1].returncode is None
+    await player.stop()
+    assert procs[1].returncode is not None
+
+
+async def test_mpv_stop_tolerates_process_lookup_error(tmp_path):
+    class Gone(DummyProc):
+        def terminate(self):
+            raise ProcessLookupError
+
+        async def wait(self):
+            await asyncio.sleep(10)
+
+    player = MpvPlayer(make_cfg(tmp_path), spawn=lambda args: _async_value(Gone()))
+    await player.play(Path("a.mp4"))
+    await player.stop()

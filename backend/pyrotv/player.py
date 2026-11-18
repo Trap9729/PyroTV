@@ -99,9 +99,14 @@ class MpvPlayer:
         self._cfg = cfg
         self._spawn = spawn
         self._proc: Any = None
+        self._lock = asyncio.Lock()
 
     async def play(self, path: Path) -> None:
-        await self.stop()
+        async with self._lock:
+            await self._play_locked(path)
+
+    async def _play_locked(self, path: Path) -> None:
+        await self._stop_locked()
         sock = self._cfg.mpv_socket
         try:
             sock.unlink()
@@ -165,6 +170,10 @@ class MpvPlayer:
             await self._try_ipc(["cycle", "pause"])
 
     async def stop(self) -> None:
+        async with self._lock:
+            await self._stop_locked()
+
+    async def _stop_locked(self) -> None:
         proc = self._proc
         self._proc = None
         if proc is None or proc.returncode is not None:
@@ -175,12 +184,17 @@ class MpvPlayer:
             return
         except asyncio.TimeoutError:
             pass
-        proc.terminate()
         try:
+            proc.terminate()
             await asyncio.wait_for(proc.wait(), 2.0)
+        except ProcessLookupError:
+            return  # already exited
         except asyncio.TimeoutError:
-            proc.kill()
-            await proc.wait()
+            try:
+                proc.kill()
+                await proc.wait()
+            except ProcessLookupError:
+                pass
 
     async def status(self) -> PlayerStatus:
         if not self._running():

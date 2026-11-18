@@ -1,3 +1,4 @@
+import asyncio
 from pathlib import Path
 
 import pytest
@@ -140,3 +141,49 @@ async def test_start_local_stops_active_tv(env):
     r = await svc.start("a-x")
     assert r.mode == "local"
     assert (await player.status()).state == "idle"
+
+
+async def test_disconnect_with_failing_stop_still_cleans_up(env):
+    svc, outputs, player, q, calls = env
+    outputs.connected = True
+    await svc.start("a-x")
+
+    async def boom():
+        raise RuntimeError("stop failed")
+
+    player.stop = boom
+    outputs.connected = False
+    with pytest.raises(RuntimeError):
+        await svc.poll_once()
+    assert calls[-1] == ["pactl", "set-default-sink", "jack"]
+    assert drain(q) == [{"type": "stopped", "reason": "tv_disconnected"}]
+    await svc.poll_once()  # _tv_key cleared: nothing more happens
+    assert drain(q) == []
+
+
+async def test_run_survives_poll_exception(env):
+    svc, outputs, player, q, calls = env
+    n = 0
+    orig = svc.poll_once
+
+    async def flaky():
+        nonlocal n
+        n += 1
+        if n == 1:
+            raise RuntimeError("boom")
+        await orig()
+
+    svc.poll_once = flaky
+    svc._poll_interval = 0.001
+    task = asyncio.create_task(svc.run())
+    try:
+        await asyncio.wait_for(_until(lambda: n >= 3), 2)
+    finally:
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+
+async def _until(pred):
+    while not pred():
+        await asyncio.sleep(0.001)
