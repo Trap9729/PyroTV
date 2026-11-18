@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import os
 import unicodedata
 from contextlib import asynccontextmanager
 from dataclasses import asdict
@@ -21,11 +22,14 @@ from .catalogue import Catalogue, CatalogueError, load_catalogue
 from .config import Config
 from .customs import CustomService, DuplicateName, UnknownManufacturer, cleanup_custom_orphans
 from .events import EventBus
+from .backup import BACKUP_NAME, export_backup, find_usb_mount, import_backup
+from .hotspot import Hotspot, HotspotError, run_nmcli
 from .library import Library
 from .network import is_allowed_client
 from .outputs import OutputWatcher
 from .playback import PlaybackService
 from .player import FakePlayer, MpvPlayer, Player
+from .storage import storage_usage
 from .store import Store
 from .thumbs import ensure_thumb
 from .uploads import DiskFull, IncompleteUpload, OffsetMismatch, UploadManager
@@ -423,15 +427,100 @@ def _custom_router() -> APIRouter:
     return r
 
 
+HOTSPOT_URL = "http://10.42.0.1"
+
+
+class HotspotBody(BaseModel):
+    on: bool
+
+
+def _hotspot_json(h: Hotspot) -> dict:
+    pin = h.pin
+    return {
+        "on": pin is not None and h.is_up,
+        "ssid": h.ssid,
+        "pin": pin,
+        "url": HOTSPOT_URL,
+        "qr_svg": h.qr_svg(),
+    }
+
+
+def _ops_router() -> APIRouter:
+    r = APIRouter()
+
+    @r.get("/api/storage")
+    def get_storage(request: Request) -> dict:
+        return asdict(storage_usage(request.app.state.cfg))
+
+    @r.get("/api/hotspot")
+    def get_hotspot(request: Request) -> dict:
+        return _hotspot_json(request.app.state.hotspot)
+
+    @r.post("/api/hotspot")
+    def set_hotspot(body: HotspotBody, request: Request) -> dict:
+        h = request.app.state.hotspot
+        if body.on:
+            try:
+                h.up()
+            except HotspotError:
+                log.exception("hotspot start failed")
+                raise HTTPException(502, "hotspot_failed") from None
+        else:
+            h.down()
+        return _hotspot_json(h)
+
+    def _usb(request: Request) -> Path:
+        s = request.app.state
+        mount = find_usb_mount(s.usb_root, s.usb_is_mount)
+        if mount is None:
+            raise HTTPException(409, "no_usb")
+        return mount
+
+    @r.post("/api/backup/export")
+    def backup_export(request: Request) -> dict:
+        mount = _usb(request)
+        try:
+            path = export_backup(request.app.state.store, mount)
+        except OSError:
+            log.exception("backup export failed")
+            raise HTTPException(409, "no_usb") from None
+        return {"path": str(path)}
+
+    @r.post("/api/backup/import")
+    def backup_import(request: Request) -> dict:
+        mount = _usb(request)
+        path = mount / BACKUP_NAME
+        if not path.is_file():
+            raise HTTPException(404, "no_backup")
+        try:
+            import_backup(request.app.state.store, path)
+        except (ValueError, OSError):
+            raise HTTPException(422, "invalid_backup") from None
+        return {"imported": True}
+
+    @r.get("/api/diagnostics")
+    def diagnostics(request: Request) -> dict:
+        s = request.app.state
+        return {
+            "missing_media": list(s.catalogue.missing),
+            "free_bytes": storage_usage(s.cfg).free_bytes,
+            "catalogue_error": s.catalogue_error,
+        }
+
+    return r
+
+
 def create_app(
     cfg: Config,
     *,
     player: Player | None = None,
     watcher_interval: float = 2.0,
     custom_process: tuple[Callable[[Path, Path], None], Callable[[Path, Path], None]] | None = None,
+    hotspot_run: Callable[[list[str]], int] | None = None,
 ) -> FastAPI:
     """`custom_process=(process_video, process_image)` replaces the ffmpeg/Pillow
-    pipeline of CustomService (test seam; production leaves it None)."""
+    pipeline of CustomService; `hotspot_run` replaces the nmcli runner (test seams;
+    production leaves both None)."""
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         cfg.ensure_dirs()
@@ -464,8 +553,15 @@ def create_app(
             s.cfg, s.store, s.catalogue, s.catalogue_error = cfg, store, catalogue, catalogue_error
             s.library, s.bus, s.outputs, s.player, s.playback = library, bus, outputs, pl, playback
             s.uploads, s.customs = uploads, customs
+            runner = hotspot_run or ((lambda args: 0) if cfg.fake_hw else run_nmcli)
+            hotspot = Hotspot(cfg, store, runner)
+            s.hotspot = hotspot
+            s.usb_root, s.usb_is_mount = Path("/media"), os.path.ismount
+            # The hotspot must be off after boot (the PIN is lost on restart anyway).
+            await asyncio.to_thread(hotspot.down)
 
             tasks = [
+                asyncio.create_task(hotspot.run_autooff(), name="hotspot-autooff"),
                 asyncio.create_task(outputs.run(), name="outputs"),
                 asyncio.create_task(playback.run(), name="playback"),
                 asyncio.create_task(_views_flush_loop(store), name="views-flush"),
@@ -492,6 +588,7 @@ def create_app(
     app.include_router(_playback_router())
     app.include_router(_uploads_router())
     app.include_router(_custom_router())
+    app.include_router(_ops_router())
     # Later tasks: include their routers here, before the static mount.
     if cfg.static_dir.is_dir():
         app.mount("/", StaticFiles(directory=cfg.static_dir, html=True), name="static")
