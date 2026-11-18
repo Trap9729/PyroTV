@@ -7,6 +7,7 @@ import {
   canAdvance,
   groupByCategory,
   formatPin,
+  runLimited,
   OTHER_CATEGORY,
 } from "../js/views/wizard-logic.js";
 
@@ -68,4 +69,22 @@ test("formatPin spaces digits in groups of four", () => {
   assert.equal(formatPin("12345678"), "1234 5678");
   assert.equal(formatPin("123456"), "1234 56");
   assert.equal(formatPin(null), "");
+});
+
+test("runLimited runs every item, never exceeds the limit and counts failures", async () => {
+  let active = 0;
+  let peak = 0;
+  const seen = [];
+  const failed = await runLimited([1, 2, 3, 4, 5, 6, 7], 3, async (n) => {
+    active++;
+    peak = Math.max(peak, active);
+    await new Promise((r) => setTimeout(r, 2));
+    active--;
+    seen.push(n);
+    if (n % 3 === 0) throw new Error("no");
+  });
+  assert.equal(failed, 2);
+  assert.equal(peak, 3);
+  assert.deepEqual(seen.sort(), [1, 2, 3, 4, 5, 6, 7]);
+  assert.equal(await runLimited([], 4, async () => {}), 0);
 });

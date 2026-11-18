@@ -31,6 +31,18 @@ def test_hotspot_pin_lifecycle(make_client):
         assert ["nmcli", "con", "down", "pyrotv-hotspot"] in calls
 
 
+def test_hotspot_reports_autooff_minutes(make_client):
+    with make_client() as c:
+        assert c.get("/api/hotspot").json()["autooff_minutes"] == 30
+        assert c.post("/api/hotspot", json={"on": False}).json()["autooff_minutes"] == 30
+        c.put("/api/settings", json={"hotspot_autooff_minutes": 0})
+        assert c.get("/api/hotspot").json()["autooff_minutes"] == 0
+        c.put("/api/settings", json={"hotspot_autooff_minutes": 120})
+        assert c.post("/api/hotspot", json={"on": True}).json()["autooff_minutes"] == 120
+        c.app_state.store.set_setting("hotspot_autooff_minutes", "junk")
+        assert c.get("/api/hotspot").json()["autooff_minutes"] == 30
+
+
 def test_hotspot_failure_is_502(make_client):
     with make_client(hotspot_run=lambda a: 0 if a[2] == "down" else 1) as c:
         r = c.post("/api/hotspot", json={"on": True})

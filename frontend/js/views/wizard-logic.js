@@ -48,3 +48,22 @@ export function formatPin(pin) {
   if (!pin) return "";
   return String(pin).replace(/(.{4})(?=.)/g, "$1 ");
 }
+
+// Run `worker(item)` for every item with at most `limit` in flight.
+// Resolves with the number of items whose worker threw.
+export async function runLimited(items, limit, worker) {
+  let failed = 0;
+  let i = 0;
+  const lane = async () => {
+    while (i < items.length) {
+      const item = items[i++];
+      try {
+        await worker(item);
+      } catch {
+        failed++;
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, lane));
+  return failed;
+}

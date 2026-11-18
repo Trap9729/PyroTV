@@ -6,20 +6,19 @@ import {
   getManufacturers,
   putSettings,
   setPieceEnabled,
-  getHotspot,
-  setHotspot,
   listCustom,
   setupComplete,
 } from "../api.js";
 import { el, icon } from "../dom.js";
 import { t } from "../i18n.js";
 import { showToast } from "../toast.js";
+import { createHotspotCard } from "./hotspot-card.js";
 import {
   wizardSteps,
   diffEnabled,
   canAdvance,
   groupByCategory,
-  formatPin,
+  runLimited,
   SHOP_NAME_MAX,
 } from "./wizard-logic.js";
 
@@ -31,6 +30,7 @@ export function renderWizard(root, ctx) {
   let alive = true;
   let token = 0; // bumped on every step render; async work checks it
   let busy = false;
+  let hotCard = null;
 
   const S = {
     loaded: false,
@@ -136,6 +136,8 @@ export function renderWizard(root, ctx) {
   // ----- steps -----
   function show() {
     token++;
+    hotCard?.destroy();
+    hotCard = null;
     body.scrollTop = 0;
     const id = S.stepId;
     if (id === "shop") showShop();
@@ -298,101 +300,16 @@ export function renderWizard(root, ctx) {
     body.replaceChildren(wrap);
   }
 
-  // Hotspot card. Data (incl. the PIN) is rendered straight into the DOM and not retained.
+  // Hotspot card (shared with Settings). Data incl. the PIN lives only in the DOM.
   function showCustom() {
     const my = token;
     const wrap = el("div", "wiz-wide");
     wrap.append(title(t("wizard.custom.title"), t("wizard.custom.intro")));
-    const hot = el("div", "wiz-card wiz-hot");
-    hot.append(el("p", "wiz-status", t("wizard.loading")));
+    hotCard = createHotspotCard({ onBusy: (b) => alive && setBusy(b) });
     const existing = el("div", "wiz-card wiz-existing");
-    wrap.append(hot, existing);
+    wrap.append(hotCard.node, existing);
     body.replaceChildren(wrap);
-
-    const renderHot = (h) => {
-      if (!alive || my !== token) return;
-      hot.replaceChildren(...hotspotNodes(h));
-    };
-    const toggle = async (on) => {
-      if (busy) return;
-      setBusy(true);
-      hot.replaceChildren(el("p", "wiz-status", on ? t("wizard.custom.starting") : t("wizard.custom.stopping")));
-      try {
-        renderHot(await setHotspot(on));
-      } catch {
-        if (!alive || my !== token) return;
-        showToast(t("wizard.custom.error"));
-        try {
-          renderHot(await getHotspot());
-        } catch {
-          hot.replaceChildren(offNodes());
-        }
-      } finally {
-        if (alive) setBusy(false);
-      }
-    };
-    const offNodes = () => {
-      const f = document.createDocumentFragment();
-      f.append(
-        el("p", "wiz-status", t("wizard.custom.off")),
-        button("btn btn-primary wiz-big", t("wizard.custom.start"), () => toggle(true)),
-        el("p", "wiz-note", t("wizard.custom.newPin")),
-      );
-      return f;
-    };
-    const hotspotNodes = (h) => {
-      if (!h?.on) return [offNodes()];
-      const f = document.createDocumentFragment();
-      const info = el("div", "wiz-hot-info");
-      const row = (label, value, cls) => {
-        const r = el("div", "wiz-kv");
-        r.append(el("span", "wiz-k", label), el("span", `wiz-v ${cls || ""}`, value));
-        return r;
-      };
-      info.append(
-        el("p", "wiz-steps", t("wizard.custom.step1")),
-        row(t("wizard.custom.ssid"), h.ssid ?? ""),
-        row(t("wizard.custom.pin"), formatPin(h.pin), "wiz-pin"),
-        el("p", "wiz-steps", t("wizard.custom.step2")),
-        row(t("wizard.custom.url"), h.url ?? ""),
-        el("p", "wiz-note", t("wizard.custom.newPin")),
-        button("btn btn-ghost wiz-big", t("wizard.custom.stop"), () => toggle(false)),
-      );
-      f.append(info);
-      const qr = qrNode(h.qr_svg);
-      if (qr) f.append(qr);
-      return [f];
-    };
-    const qrNode = (svgText) => {
-      if (!svgText) return null;
-      // The backend SVG carries no xmlns; without it XML parsing yields non-SVG elements.
-      const xml = /xmlns=/.test(svgText.slice(0, 300))
-        ? svgText
-        : svgText.replace("<svg", '<svg xmlns="http://www.w3.org/2000/svg"');
-      const doc = new DOMParser().parseFromString(xml, "image/svg+xml");
-      const svg = doc.documentElement;
-      if (!svg || svg.localName !== "svg" || doc.querySelector("parsererror")) return null;
-      const node = document.importNode(svg, true);
-      if (!node.hasAttribute("viewBox")) {
-        const w = parseFloat(node.getAttribute("width"));
-        const h = parseFloat(node.getAttribute("height"));
-        if (w > 0 && h > 0) node.setAttribute("viewBox", `0 0 ${w} ${h}`);
-      }
-      node.removeAttribute("width");
-      node.removeAttribute("height");
-      node.classList.add("wiz-qr-svg");
-      node.setAttribute("role", "img");
-      node.setAttribute("aria-label", t("wizard.custom.qr"));
-      const box = el("div", "wiz-qr");
-      box.append(node);
-      return box;
-    };
-
-    getHotspot().then(renderHot, () => {
-      if (!alive || my !== token) return;
-      showToast(t("wizard.custom.error"));
-      hot.replaceChildren(offNodes());
-    });
+    hotCard.load();
 
     existing.append(el("h2", "wiz-sub", t("wizard.custom.listTitle")));
     listCustom().then(
@@ -464,21 +381,11 @@ export function renderWizard(root, ctx) {
     const want = S.ticks.get(id);
     const { enable, disable } = diffEnabled(cur, want);
     const jobs = [...enable.map((k) => [k, true]), ...disable.map((k) => [k, false])];
-    let failed = 0;
-    let i = 0;
-    const worker = async () => {
-      while (i < jobs.length) {
-        const [key, on] = jobs[i++];
-        try {
-          await setPieceEnabled(key, on);
-          if (on) cur.add(key);
-          else cur.delete(key);
-        } catch {
-          failed++;
-        }
-      }
-    };
-    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, jobs.length) }, worker));
+    const failed = await runLimited(jobs, CONCURRENCY, async ([key, on]) => {
+      await setPieceEnabled(key, on);
+      if (on) cur.add(key);
+      else cur.delete(key);
+    });
     // Ticks must mirror what the server really has.
     S.ticks.set(id, new Set(cur));
     return failed === 0;
@@ -534,5 +441,6 @@ export function renderWizard(root, ctx) {
   return () => {
     alive = false;
     token++;
+    hotCard?.destroy();
   };
 }

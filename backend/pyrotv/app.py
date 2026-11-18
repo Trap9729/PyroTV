@@ -23,7 +23,7 @@ from .config import Config
 from .customs import CustomService, DuplicateName, UnknownManufacturer, cleanup_custom_orphans
 from .events import EventBus
 from .backup import BACKUP_NAME, export_backup, find_usb_mount, import_backup
-from .hotspot import Hotspot, HotspotError, run_nmcli
+from .hotspot import DEFAULT_AUTOOFF_MINUTES, Hotspot, HotspotError, run_nmcli
 from .library import Library
 from .network import is_allowed_client
 from .outputs import OutputWatcher
@@ -434,14 +434,19 @@ class HotspotBody(BaseModel):
     on: bool
 
 
-def _hotspot_json(h: Hotspot) -> dict:
+def _hotspot_json(h: Hotspot, store: Store) -> dict:
     pin = h.pin
+    try:
+        autooff = int(store.get_setting("hotspot_autooff_minutes", str(DEFAULT_AUTOOFF_MINUTES)))
+    except (TypeError, ValueError):
+        autooff = DEFAULT_AUTOOFF_MINUTES
     return {
         "on": pin is not None and h.is_up,
         "ssid": h.ssid,
         "pin": pin,
         "url": HOTSPOT_URL,
         "qr_svg": h.qr_svg(),
+        "autooff_minutes": autooff,
     }
 
 
@@ -454,7 +459,7 @@ def _ops_router() -> APIRouter:
 
     @r.get("/api/hotspot")
     def get_hotspot(request: Request) -> dict:
-        return _hotspot_json(request.app.state.hotspot)
+        return _hotspot_json(request.app.state.hotspot, request.app.state.store)
 
     @r.post("/api/hotspot")
     def set_hotspot(body: HotspotBody, request: Request) -> dict:
@@ -467,7 +472,7 @@ def _ops_router() -> APIRouter:
                 raise HTTPException(502, "hotspot_failed") from None
         else:
             h.down()
-        return _hotspot_json(h)
+        return _hotspot_json(h, request.app.state.store)
 
     def _usb(request: Request) -> Path:
         s = request.app.state
