@@ -102,6 +102,10 @@ def test_sort_views_and_enabled_flow(make_client):
         states = {p["key"]: p["enabled"] for p in lesli["pieces"]}
         assert states == {KEY_BLIXT: False, KEY_ASKA: True}
         assert [p["name"] for p in lesli["pieces"]] == ["Blixt", "Åska 49"]
+        assert {p["key"]: p["category"] for p in lesli["pieces"]} == {
+            KEY_BLIXT: "Batterier",
+            KEY_ASKA: "Åska",
+        }
 
 
 def test_unknown_key_404(make_client):
@@ -190,6 +194,38 @@ def test_views_flushed_on_shutdown(make_client, cfg):
         assert s.views().get(KEY_ORN) == 1
     finally:
         s.close()
+
+
+def test_shutdown_flushes_even_if_a_task_failed(make_client, cfg, monkeypatch):
+    from pyrotv import app as app_mod
+    from pyrotv.store import Store
+
+    async def broken_loop(store):
+        raise RuntimeError("loop crashed")
+
+    monkeypatch.setattr(app_mod, "_views_flush_loop", broken_loop)
+    with make_client(TOUCH) as c:
+        c.post(f"/api/pieces/{KEY_ORN}/view")
+    s = Store(cfg.db_path)
+    try:
+        assert s.views().get(KEY_ORN) == 1
+    finally:
+        s.close()
+
+
+def test_hotspot_client_activity_is_recorded(make_client):
+    with make_client(TOUCH) as c:
+        c.get("/api/state")
+        assert c.app_state.hotspot._last_activity == 0.0
+    with make_client(PHONE) as c:
+        c.get("/api/state")
+        assert c.app_state.hotspot._last_activity > 0.0
+
+
+def test_hotspot_gateway_address_is_not_activity(make_client):
+    with make_client(("10.42.0.1", 5000)) as c:
+        c.get("/api/state")
+        assert c.app_state.hotspot._last_activity == 0.0
 
 
 class _Outputs:

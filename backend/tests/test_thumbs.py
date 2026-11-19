@@ -28,6 +28,17 @@ def test_second_call_hits_cache(tmp_path: Path):
     assert second.stat().st_mtime_ns == 1_000_000_000
 
 
+def test_zero_byte_cache_file_is_regenerated(tmp_path: Path):
+    src = tmp_path / "a.jpg"
+    Image.new("RGB", (1200, 800)).save(src)
+    first = ensure_thumb(src, tmp_path / "cache")
+    first.write_bytes(b"")  # power cut before the data reached the disk
+    second = ensure_thumb(src, tmp_path / "cache")
+    assert second == first and second.stat().st_size > 0
+    with Image.open(second) as im:
+        assert im.format == "JPEG"
+
+
 def test_small_image_not_upscaled(tmp_path: Path):
     src = tmp_path / "s.jpg"
     Image.new("RGB", (200, 100)).save(src)

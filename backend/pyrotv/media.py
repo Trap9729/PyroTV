@@ -18,6 +18,12 @@ class VideoInfo:
     height: int
     fps: float
     has_audio: bool
+    pix_fmt: str = "yuv420p"
+
+
+PROBE_TIMEOUT_S = 60
+COPY_TIMEOUT_S = 1800
+TRANSCODE_TIMEOUT_S = 7200
 
 
 def _run(cmd: list[str], **kw) -> subprocess.CompletedProcess:
@@ -65,7 +71,8 @@ def _fps(rate: str) -> float:
 def probe(path: Path, *, run: Runner = _run, ffprobe: str | None = None) -> VideoInfo:
     exe = ffprobe or ffprobe_exe()
     res = run(
-        [exe, "-v", "error", "-print_format", "json", "-show_streams", "-show_format", str(path)]
+        [exe, "-v", "error", "-print_format", "json", "-show_streams", "-show_format", str(path)],
+        timeout=PROBE_TIMEOUT_S,
     )
     if res.returncode != 0:
         raise ValueError(f"ffprobe failed: {(res.stderr or '')[-200:]}")
@@ -79,19 +86,32 @@ def probe(path: Path, *, run: Runner = _run, ffprobe: str | None = None) -> Vide
         height=int(video.get("height", 0)),
         fps=_fps(str(video.get("r_frame_rate", "0/1"))),
         has_audio=any(s.get("codec_type") == "audio" for s in streams),
+        pix_fmt=str(video.get("pix_fmt", "")),
     )
 
 
 def needs_transcode(info: VideoInfo) -> bool:
-    return not (info.codec == "h264" and info.height <= 1080 and info.fps <= 30.5)
+    return not (
+        info.codec == "h264"
+        and info.height <= 1080
+        and info.fps <= 30.5
+        and info.pix_fmt in ("yuv420p", "yuvj420p")
+    )
 
 
 def build_ffmpeg_args(src: Path, dest: Path, info: VideoInfo, *, ffmpeg: str | None = None) -> list[str]:
     exe = ffmpeg or ffmpeg_exe()
     if not needs_transcode(info):
-        return [exe, "-y", "-i", str(src), "-c", "copy", "-movflags", "+faststart", "-f", "mp4", str(dest)]
+        return [
+            exe, "-y", "-i", str(src),
+            "-map", "0:v:0", "-map", "0:a:0?",
+            "-c:v", "copy", "-c:a", "aac", "-b:a", "160k",
+            "-movflags", "+faststart", "-f", "mp4",
+            str(dest),
+        ]
     return [
         exe, "-y", "-i", str(src),
+        "-threads", "2",
         "-map", "0:v:0", "-map", "0:a:0?",
         "-vf", "scale=-2:'min(1080,ih)'",
         "-r", "30",
@@ -117,9 +137,16 @@ def process_video(
 ) -> None:
     part = dest.with_name(dest.name + ".part")
     try:
-        if info is None:
-            info = probe(src, run=run)
-        res = run(build_ffmpeg_args(src, part, info, ffmpeg=ffmpeg))
+        try:
+            if info is None:
+                info = probe(src, run=run)
+            cmd = build_ffmpeg_args(src, part, info, ffmpeg=ffmpeg)
+            if os.name == "posix" and shutil.which("nice"):
+                cmd = ["nice", "-n", "10", *cmd]
+            timeout = TRANSCODE_TIMEOUT_S if needs_transcode(info) else COPY_TIMEOUT_S
+            res = run(cmd, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            raise RuntimeError("ffmpeg timed out") from None
         if res.returncode != 0:
             raise RuntimeError(f"ffmpeg failed: {(res.stderr or '')[-500:]}")
         _fsync_file(part)
@@ -133,6 +160,8 @@ def process_image(src: Path, dest: Path) -> None:
     part = dest.with_name(dest.name + ".part")
     try:
         with Image.open(src) as im:
+            if im.format == "JPEG":
+                im.draft("RGB", (3200, 3200))  # decode big phone photos at reduced scale
             im = ImageOps.exif_transpose(im).convert("RGB")
             im.thumbnail((1600, 1600), Image.Resampling.LANCZOS)  # never upscales
             with open(part, "wb") as f:

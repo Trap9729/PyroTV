@@ -235,6 +235,25 @@ def test_update(env):
         svc.update(9999, "Z", "Batterier")
 
 
+def test_update_rename_keeps_views_and_disabled_flag(env):
+    _, store, lib, up, svc = env
+    assert wait(svc, create(svc, up))["state"] == "done"
+    old = make_key("a", "Min raket")
+    new = make_key("a", "Ny raket")
+    store.add_view(old)
+    store.flush_views()
+    store.add_view(old)  # one still pending
+    store.set_piece_enabled(old, False)
+    svc.update(svc.list()[0]["id"], "Ny raket", "Batterier")
+    assert store.views().get(new) == 2 and old not in store.views()
+    assert new in store.disabled_pieces() and old not in store.disabled_pieces()
+    store.flush_views()
+    assert store.views() == {new: 2}
+    # a category-only edit leaves the key (and its data) alone
+    svc.update(svc.list()[0]["id"], "Ny raket", "Annat")
+    assert store.views() == {new: 2} and new in store.disabled_pieces()
+
+
 def test_cleanup_custom_orphans(env):
     cfg, store, lib, up, svc = env
     assert wait(svc, create(svc, up, image_upload_id=upload(up, "image")))["state"] == "done"

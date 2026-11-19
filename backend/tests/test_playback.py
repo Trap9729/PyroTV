@@ -87,7 +87,7 @@ async def test_tv_disconnect_stops(env):
     await svc.poll_once()
     assert (await player.status()).state == "idle"
     assert calls[-1] == ["pactl", "set-default-sink", "jack"]
-    assert drain(q) == [{"type": "stopped", "reason": "tv_disconnected"}]
+    assert drain(q) == [{"type": "stopped", "reason": "tv_disconnected", "key": "a-x"}]
     await svc.poll_once()
     assert drain(q) == []
 
@@ -99,13 +99,28 @@ async def test_poll_publishes_and_ends(env):
     player.tick(4)
     await svc.poll_once()
     assert drain(q) == [
-        {"type": "player", "state": "playing", "position": 4.0, "duration": 10.0}
+        {"type": "player", "key": "a-x", "state": "playing", "position": 4.0, "duration": 10.0}
     ]
     player.tick(100)
     await svc.poll_once()
-    assert drain(q) == [{"type": "stopped", "reason": "ended"}]
+    assert drain(q) == [{"type": "stopped", "reason": "ended", "key": "a-x"}]
     await svc.poll_once()
     assert drain(q) == []
+
+
+async def test_apply_audio_runs_off_the_event_loop(env):
+    import threading
+
+    svc, outputs, player, q, calls = env
+    threads = []
+    svc._run = lambda args: threads.append(threading.current_thread())
+    await svc.start("a-x")  # local
+    outputs.connected = True
+    await svc.start("a-x")  # tv
+    outputs.connected = False
+    await svc.poll_once()  # disconnect
+    assert len(threads) == 3
+    assert all(t is not threading.main_thread() for t in threads)
 
 
 async def test_tv_connecting_during_local_changes_nothing(env):
@@ -128,7 +143,7 @@ async def test_commands(env):
     assert (await player.status()).state == "paused"
     await svc.command("stop")
     assert (await player.status()).state == "idle"
-    assert drain(q) == [{"type": "stopped", "reason": "user"}]
+    assert drain(q) == [{"type": "stopped", "reason": "user", "key": "a-x"}]
     await svc.command("seek", 5)
     assert (await player.status()).position == 0
 
@@ -156,7 +171,7 @@ async def test_disconnect_with_failing_stop_still_cleans_up(env):
     with pytest.raises(RuntimeError):
         await svc.poll_once()
     assert calls[-1] == ["pactl", "set-default-sink", "jack"]
-    assert drain(q) == [{"type": "stopped", "reason": "tv_disconnected"}]
+    assert drain(q) == [{"type": "stopped", "reason": "tv_disconnected", "key": "a-x"}]
     await svc.poll_once()  # _tv_key cleared: nothing more happens
     assert drain(q) == []
 
@@ -227,4 +242,4 @@ async def test_stop_racing_poll_publishes_one_stopped(slow_env):
     await svc.start("a-x")
     await asyncio.gather(svc.command("stop"), svc.poll_once())
     stopped = [e for e in drain(q) if e["type"] == "stopped"]
-    assert stopped == [{"type": "stopped", "reason": "user"}]
+    assert stopped == [{"type": "stopped", "reason": "user", "key": "a-x"}]

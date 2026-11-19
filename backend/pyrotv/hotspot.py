@@ -62,6 +62,11 @@ class Hotspot:
         self._pin: str | None = None
         self._is_up = False
         self._up_since = 0.0
+        self._last_activity = 0.0
+
+    def touch(self) -> None:
+        """Record hotspot client activity. Lock-free: called on the event loop."""
+        self._last_activity = self._now()
 
     @property
     def ssid(self) -> str:
@@ -90,6 +95,8 @@ class Hotspot:
             if self._run(["nmcli", "con", "modify", CONNECTION, "wifi-sec.psk", pin]) != 0:
                 raise HotspotError("could not set the hotspot password")
             if self._run(["nmcli", "con", "up", CONNECTION]) != 0:
+                # A half-activated connection would keep the new password live.
+                self._run(["nmcli", "con", "down", CONNECTION])
                 raise HotspotError("could not start the hotspot")
             self._pin = pin
             self._is_up = True
@@ -126,7 +133,8 @@ class Hotspot:
             if not self._is_up:
                 return False
             minutes = self._autooff_minutes()
-            if minutes <= 0 or self._now() - self._up_since < minutes * 60:
+            idle_since = max(self._up_since, self._last_activity)
+            if minutes <= 0 or self._now() - idle_since < minutes * 60:
                 return False
             self._down_locked()
             return True

@@ -138,6 +138,20 @@ def test_upload_route_errors(make_client):
         assert c.put("/api/uploads/" + "0" * 32, params={"offset": 0}, content=b"x").status_code == 404
 
 
+def test_chunk_disk_full_is_507(make_client):
+    from pyrotv.uploads import DiskFull
+
+    with make_client(TOUCH, custom_process=STUBS) as c:
+        uid = c.post("/api/uploads", json={"kind": "video", "filename": "a.mp4", "size": 100}).json()["id"]
+
+        def full(*a):
+            raise DiskFull("not enough free disk space")
+
+        c.app_state.uploads.write_chunk = full
+        r = c.put(f"/api/uploads/{uid}", params={"offset": 0}, content=b"x" * 40)
+        assert r.status_code == 507 and r.json() == {"detail": "not enough free disk space"}
+
+
 def test_failed_job_via_api_leaves_nothing(make_client, cfg):
     with make_client(TOUCH, custom_process=(failing_video, STUBS[1])) as c:
         vid = put_all(c, "video", "a.mp4", b"v" * 100)

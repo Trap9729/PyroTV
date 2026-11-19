@@ -62,6 +62,21 @@ def test_disabled_pieces_toggle(store):
     assert store.disabled_pieces() == set()
 
 
+def test_rename_piece_key_merges_views(store):
+    store.add_view("a:old")
+    store.add_view("a:new")
+    store.flush_views()
+    store.add_view("a:old")
+    store.set_piece_enabled("a:old", False)
+    store.rename_piece_key("a:old", "a:new")
+    assert store.views() == {"a:new": 3}
+    assert store.disabled_pieces() == {"a:new"}
+    store.flush_views()
+    assert store.views() == {"a:new": 3}
+    store.rename_piece_key("a:none", "a:other")  # nothing recorded: no-op
+    assert store.views() == {"a:new": 3} and store.disabled_pieces() == {"a:new"}
+
+
 def test_custom_manufacturer_id(store):
     assert store.add_custom_manufacturer("Min Tillverkare") == "c-min-tillverkare"
     with pytest.raises(ValueError):

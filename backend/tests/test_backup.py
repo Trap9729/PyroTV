@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 
 import pytest
 
@@ -66,6 +67,22 @@ def test_import_rejects_bad_files(store, tmp_path):
         f.write_text(content)
         with pytest.raises(ValueError):
             import_backup(store, f)
+
+
+def test_import_rejects_deep_nesting_and_db_errors(store, tmp_path, monkeypatch):
+    f = tmp_path / "deep.json"
+    f.write_text('{"version": 1, "state": ' + "[" * 100000 + "]" * 100000 + "}")
+    with pytest.raises(ValueError):
+        import_backup(store, f)
+
+    def broken(state):
+        raise sqlite3.IntegrityError("constraint failed")
+
+    monkeypatch.setattr(store, "import_state", broken)
+    ok = tmp_path / "ok.json"
+    ok.write_text('{"version": 1, "state": {}}')
+    with pytest.raises(ValueError):
+        import_backup(store, ok)
 
 
 def test_find_usb_mount(tmp_path):

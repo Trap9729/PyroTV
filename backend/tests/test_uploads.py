@@ -61,6 +61,35 @@ def test_disk_full(tmp_path):
         m.create("video", "a.mp4", 100 * MB)
 
 
+@pytest.mark.parametrize("code", ["ENOSPC", "EDQUOT"])
+def test_write_chunk_disk_full(tmp_path, monkeypatch, code):
+    import errno
+
+    if not hasattr(errno, code):
+        pytest.skip(f"{code} not defined on this platform")
+    _, m = _mgr(tmp_path)
+    info = m.create("video", "a.mp4", 100)
+
+    def full(*a, **kw):
+        raise OSError(getattr(errno, code), "No space left on device")
+
+    monkeypatch.setattr("pyrotv.uploads.open", full, raising=False)
+    with pytest.raises(DiskFull):
+        m.write_chunk(info.id, 0, b"x" * 10)
+
+
+def test_write_chunk_other_os_error_propagates(tmp_path, monkeypatch):
+    _, m = _mgr(tmp_path)
+    info = m.create("video", "a.mp4", 100)
+
+    def denied(*a, **kw):
+        raise PermissionError(13, "denied")
+
+    monkeypatch.setattr("pyrotv.uploads.open", denied, raising=False)
+    with pytest.raises(PermissionError):
+        m.write_chunk(info.id, 0, b"x" * 10)
+
+
 def test_finish_incomplete(tmp_path):
     _, m = _mgr(tmp_path)
     info = m.create("video", "a.mp4", 100)

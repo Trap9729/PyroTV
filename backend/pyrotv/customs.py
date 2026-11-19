@@ -190,6 +190,10 @@ class CustomService:
                 raise KeyError(id)
             self._check_duplicate(row.manufacturer_id, name, exclude_id=id)
             self._store.update_custom_piece(id, name, category)
+            old_key = make_key(row.manufacturer_id, row.name)
+            new_key = make_key(row.manufacturer_id, name)
+            if old_key != new_key:
+                self._store.rename_piece_key(old_key, new_key)
             self._library.reload_custom()
 
     def delete(self, id: int) -> None:

@@ -245,6 +245,31 @@ class Store:
                 (name, category, id),
             )
 
+    def rename_piece_key(self, old: str, new: str) -> None:
+        """Carry views and the disabled flag over to a piece's new key."""
+        if old == new:
+            return
+        with self._lock, self._conn:
+            row = self._conn.execute(
+                "SELECT count FROM views WHERE piece_key=?", (old,)
+            ).fetchone()
+            if row is not None:
+                self._conn.execute(
+                    "INSERT INTO views(piece_key, count) VALUES(?, ?) "
+                    "ON CONFLICT(piece_key) DO UPDATE SET count=count+excluded.count",
+                    (new, row[0]),
+                )
+                self._conn.execute("DELETE FROM views WHERE piece_key=?", (old,))
+            if self._conn.execute(
+                "DELETE FROM disabled_pieces WHERE piece_key=?", (old,)
+            ).rowcount:
+                self._conn.execute(
+                    "INSERT OR IGNORE INTO disabled_pieces(piece_key) VALUES(?)", (new,)
+                )
+            pending = self._pending.pop(old, 0)
+            if pending:
+                self._pending[new] = self._pending.get(new, 0) + pending
+
     def delete_custom_piece(self, id: int) -> CustomRow | None:
         with self._lock, self._conn:
             row = self._conn.execute(

@@ -73,6 +73,39 @@ def test_run_command_missing_executable_does_not_raise():
     run_command(["definitely-not-a-real-executable-xyz"])
 
 
+def test_run_command_os_error_does_not_raise(monkeypatch):
+    def boom(*a, **kw):
+        raise PermissionError(13, "denied")
+
+    monkeypatch.setattr("pyrotv.outputs.subprocess.run", boom)
+    run_command(["pactl", "info"])
+
+
+async def test_watcher_survives_probe_exception(tmp_path):
+    bus = EventBus()
+    q = bus.subscribe()
+    n = 0
+
+    def probe():
+        nonlocal n
+        n += 1
+        if n == 1:
+            raise OSError("sysfs hiccup")
+        return True
+
+    w = OutputWatcher(make_cfg(tmp_path), bus, interval=0.01, probe=probe)
+    task = asyncio.create_task(w.run())
+    try:
+        assert await asyncio.wait_for(q.get(), 2) == {"type": "tv", "connected": True}
+        assert n >= 2
+    finally:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+
 def _seq_probe(values):
     it = iter(values)
     last = values[-1]

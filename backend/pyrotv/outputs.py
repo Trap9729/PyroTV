@@ -28,7 +28,7 @@ def tv_connected(connector: str, drm_root: Path = Path("/sys/class/drm")) -> boo
 def run_command(args: list[str]) -> None:
     try:
         subprocess.run(args, check=False, timeout=5, capture_output=True)
-    except (FileNotFoundError, subprocess.TimeoutExpired) as e:
+    except (OSError, subprocess.TimeoutExpired) as e:
         log.warning("command %s failed: %s", args, e)
 
 
@@ -60,7 +60,11 @@ class OutputWatcher:
 
     async def run(self) -> None:
         while True:
-            now = await asyncio.to_thread(self._probe)
+            try:
+                now = await asyncio.to_thread(self._probe)
+            except Exception:
+                log.exception("tv probe failed")
+                now = self.connected
             if now != self.connected:
                 self.connected = now
                 self._bus.publish({"type": "tv", "connected": now})

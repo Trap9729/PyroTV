@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import json
 import os
 import re
@@ -22,6 +23,9 @@ VIDEO_EXTS = (".mp4", ".mov", ".m4v", ".mkv", ".avi", ".webm")
 IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".webp")
 
 _ID_RE = re.compile(r"^[0-9a-f]{32}$")
+_DISK_FULL_ERRNOS = tuple(
+    n for n in (getattr(errno, "ENOSPC", None), getattr(errno, "EDQUOT", None)) if n is not None
+)
 
 
 class DiskFull(Exception):
@@ -129,10 +133,15 @@ class UploadManager:
             raise OffsetMismatch(received)
         if received + len(data) > meta["size"]:
             raise ValueError("chunk exceeds declared upload size")
-        with open(part, "ab") as f:
-            f.write(data)
-            f.flush()
-            os.fsync(f.fileno())
+        try:
+            with open(part, "ab") as f:
+                f.write(data)
+                f.flush()
+                os.fsync(f.fileno())
+        except OSError as e:
+            if e.errno in _DISK_FULL_ERRNOS:
+                raise DiskFull("not enough free disk space") from e
+            raise
         return received + len(data)
 
     def finish(self, upload_id: str) -> Path:

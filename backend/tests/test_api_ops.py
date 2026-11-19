@@ -31,6 +31,12 @@ def test_hotspot_pin_lifecycle(make_client):
         assert ["nmcli", "con", "down", "pyrotv-hotspot"] in calls
 
 
+def test_hotspot_responses_are_not_cached(make_client):
+    with make_client() as c:
+        assert c.get("/api/hotspot").headers["cache-control"] == "no-store"
+        assert c.post("/api/hotspot", json={"on": True}).headers["cache-control"] == "no-store"
+
+
 def test_hotspot_reports_autooff_minutes(make_client):
     with make_client() as c:
         assert c.get("/api/hotspot").json()["autooff_minutes"] == 30

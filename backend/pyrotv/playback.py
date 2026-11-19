@@ -60,14 +60,14 @@ class PlaybackService:
         if piece is None or piece.video is None:
             raise KeyError(key)
         if self._outputs.connected:
-            apply_audio(True, self._cfg, self._run)
+            await asyncio.to_thread(apply_audio, True, self._cfg, self._run)
             await self._player.play(piece.video)
             self._tv_key = key
             return PlayStart(mode="tv", title=piece.name, key=key)
         if self._tv_key is not None:
             await self._player.stop()
             self._tv_key = None
-        apply_audio(False, self._cfg, self._run)
+        await asyncio.to_thread(apply_audio, False, self._cfg, self._run)
         return PlayStart(mode="local", title=piece.name, key=key)
 
     async def _command_locked(self, cmd: str, delta: float) -> None:
@@ -79,28 +79,30 @@ class PlaybackService:
             await self._player.toggle_pause()
         elif cmd == "stop":
             await self._player.stop()
-            self._tv_key = None
-            self._bus.publish({"type": "stopped", "reason": "user"})
+            key, self._tv_key = self._tv_key, None
+            self._bus.publish({"type": "stopped", "reason": "user", "key": key})
 
     async def _poll_locked(self) -> None:
         if self._tv_key is None:
             return
         if not self._outputs.connected:
+            key = self._tv_key
             try:
                 await self._player.stop()
             finally:
-                apply_audio(False, self._cfg, self._run)
                 self._tv_key = None
-                self._bus.publish({"type": "stopped", "reason": "tv_disconnected"})
+                self._bus.publish({"type": "stopped", "reason": "tv_disconnected", "key": key})
+                await asyncio.to_thread(apply_audio, False, self._cfg, self._run)
             return
         st = await self._player.status()
         if st.state == "idle":
-            self._tv_key = None
-            self._bus.publish({"type": "stopped", "reason": "ended"})
+            key, self._tv_key = self._tv_key, None
+            self._bus.publish({"type": "stopped", "reason": "ended", "key": key})
             return
         self._bus.publish(
             {
                 "type": "player",
+                "key": self._tv_key,
                 "state": st.state,
                 "position": st.position,
                 "duration": st.duration,

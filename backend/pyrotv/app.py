@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
+import ipaddress
 import json
 import logging
 import os
@@ -9,14 +9,13 @@ import unicodedata
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from pathlib import Path
-from typing import AsyncIterator, Callable, Literal
+from typing import Annotated, AsyncIterator, Callable, Literal
 from urllib.parse import quote
 
 from fastapi import APIRouter, FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, StringConstraints
-from typing_extensions import Annotated
 
 from .catalogue import Catalogue, CatalogueError, load_catalogue
 from .config import Config
@@ -58,7 +57,28 @@ class ClientGuard:
                 else:
                     await send({"type": "websocket.close", "code": 1008})
                 return
+            if scope["type"] == "http" and _is_hotspot_client(host):
+                # Phone activity postpones the hotspot auto-off. touch() is
+                # lock-free: never take Hotspot._lock on the event loop.
+                app_state = getattr(scope.get("app"), "state", None)
+                hotspot = getattr(app_state, "hotspot", None)
+                if hotspot is not None:
+                    hotspot.touch()
         await self.app(scope, receive, send)
+
+
+_HOTSPOT_NET = ipaddress.ip_network("10.42.0.0/24")
+_HOTSPOT_GATEWAY = ipaddress.ip_address("10.42.0.1")
+
+
+def _is_hotspot_client(host: str | None) -> bool:
+    try:
+        addr = ipaddress.ip_address(host or "")
+    except ValueError:
+        return False
+    if isinstance(addr, ipaddress.IPv6Address) and addr.ipv4_mapped is not None:
+        addr = addr.ipv4_mapped
+    return addr.version == 4 and addr in _HOTSPOT_NET and addr != _HOTSPOT_GATEWAY
 
 
 async def sse_stream(
@@ -217,7 +237,12 @@ def _library_router() -> APIRouter:
         by_man: dict[str, list[dict]] = {}
         for v in s.library.list(include_disabled=True):
             by_man.setdefault(v.manufacturer_id, []).append(
-                {"key": v.key, "name": v.name, "enabled": v.key not in disabled}
+                {
+                    "key": v.key,
+                    "name": v.name,
+                    "category": v.category,
+                    "enabled": v.key not in disabled,
+                }
             )
         return [
             {
@@ -351,6 +376,8 @@ def _uploads_router() -> APIRouter:
             raise HTTPException(404, "unknown upload") from None
         except OffsetMismatch as e:
             return JSONResponse({"received": e.received}, status_code=409)
+        except DiskFull:
+            raise HTTPException(507, "not enough free disk space") from None
         except ValueError as e:
             raise HTTPException(413, str(e)) from None
         return {"received": received}
@@ -458,11 +485,13 @@ def _ops_router() -> APIRouter:
         return asdict(storage_usage(request.app.state.cfg))
 
     @r.get("/api/hotspot")
-    def get_hotspot(request: Request) -> dict:
+    def get_hotspot(request: Request, response: Response) -> dict:
+        response.headers["Cache-Control"] = "no-store"
         return _hotspot_json(request.app.state.hotspot, request.app.state.store)
 
     @r.post("/api/hotspot")
-    def set_hotspot(body: HotspotBody, request: Request) -> dict:
+    def set_hotspot(body: HotspotBody, request: Request, response: Response) -> dict:
+        response.headers["Cache-Control"] = "no-store"
         h = request.app.state.hotspot
         if body.on:
             try:
@@ -575,9 +604,10 @@ def create_app(
         finally:
             for t in tasks:
                 t.cancel()
-            for t in tasks:
-                with contextlib.suppress(asyncio.CancelledError):
-                    await t
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            for t, res in zip(tasks, results):
+                if isinstance(res, Exception) and not isinstance(res, asyncio.CancelledError):
+                    log.error("background task %s failed: %r", t.get_name(), res)
             try:
                 if customs is not None:
                     await asyncio.to_thread(customs.close)

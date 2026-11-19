@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 from pathlib import Path
 from typing import Callable
 
@@ -36,7 +37,7 @@ def export_backup(store: Store, dest_dir: Path) -> Path:
 def import_backup(store: Store, path: Path) -> None:
     try:
         doc = json.loads(Path(path).read_text(encoding="utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as e:
+    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError) as e:
         raise ValueError(f"not a valid backup file: {e}") from None
     if not isinstance(doc, dict) or doc.get("version") != BACKUP_VERSION:
         raise ValueError("unsupported backup version")
@@ -53,7 +54,7 @@ def import_backup(store: Store, path: Path) -> None:
             raise ValueError(f"backup field {key!r} has the wrong shape")
     try:
         store.import_state(state)
-    except (TypeError, AttributeError, ValueError) as e:
+    except (TypeError, AttributeError, ValueError, RecursionError, sqlite3.Error) as e:
         raise ValueError(f"backup content invalid: {e}") from None
 
 

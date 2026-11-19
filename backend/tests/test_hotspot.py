@@ -88,6 +88,20 @@ def test_failure_raises_and_stays_down(cfg, store):
     assert not h.is_up and h.pin is None
 
 
+def test_failed_con_up_takes_connection_down(cfg, store):
+    calls: list[list[str]] = []
+
+    def run(args):
+        calls.append(list(args))
+        return 1 if args[2] == "up" else 0
+
+    h = Hotspot(cfg, store, run, gen_pin=lambda: "00123456")
+    with pytest.raises(HotspotError):
+        h.up()
+    assert calls[-1] == ["nmcli", "con", "down", "pyrotv-hotspot"]
+    assert not h.is_up and h.pin is None
+
+
 def test_down_failure_not_raised(cfg, store):
     h, _ = make(cfg, store)
     h.up()
@@ -186,6 +200,19 @@ async def test_autooff_tick_sees_new_up_since_after_reapply(cfg, store):
     calls.clear()
     assert await h.autooff_tick() is False
     assert h.is_up and calls == []
+
+
+async def test_client_activity_postpones_autooff(cfg, store):
+    clock = Clock()
+    h, calls = make(cfg, store, now=clock)
+    h.up()
+    store.set_setting("hotspot_autooff_minutes", "30")
+    clock.t += 20 * 60
+    h.touch()  # a phone is still using the hotspot
+    clock.t += 20 * 60  # 40 min since switch-on, 20 min idle
+    assert await h.autooff_tick() is False and h.is_up
+    clock.t += 11 * 60  # 31 min idle
+    assert await h.autooff_tick() is True and not h.is_up
 
 
 async def test_run_autooff_loop_cancels(cfg, store):

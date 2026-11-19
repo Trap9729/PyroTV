@@ -15,16 +15,25 @@ def _cache_path(src: Path, cache_dir: Path, width: int) -> Path:
     return cache_dir / (digest.hexdigest()[:16] + ".jpg")
 
 
+def _usable(out: Path) -> bool:
+    """A 0-byte cache file (power cut before the data reached the disk) is a miss."""
+    try:
+        return out.stat().st_size > 0
+    except OSError:
+        return False
+
+
 def ensure_thumb(src: Path, cache_dir: Path, width: int = 480) -> Path:
     """Return a cached JPEG thumbnail of `src` (at most `width` px wide, never upscaled)."""
     src = Path(src)
     cache_dir = Path(cache_dir)
     out = _cache_path(src, cache_dir, width)
-    if out.exists():
+    if _usable(out):
         return out
     with _lock:
-        if out.exists():
+        if _usable(out):
             return out
+        out.unlink(missing_ok=True)
         cache_dir.mkdir(parents=True, exist_ok=True)
         tmp = out.with_name(out.name + ".tmp")
         try:
@@ -34,7 +43,10 @@ def ensure_thumb(src: Path, cache_dir: Path, width: int = 480) -> Path:
                 rgb = img.convert("RGB")
             try:
                 rgb.thumbnail((width, width * 10))
-                rgb.save(tmp, format="JPEG", quality=80)
+                with open(tmp, "wb") as f:
+                    rgb.save(f, format="JPEG", quality=80)
+                    f.flush()
+                    os.fsync(f.fileno())
             finally:
                 rgb.close()
             os.replace(tmp, out)
