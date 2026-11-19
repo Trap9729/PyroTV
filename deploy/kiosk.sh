@@ -2,7 +2,9 @@
 # PyroTV kiosk browser loop, started by sway (`exec /opt/pyrotv/deploy/kiosk.sh`).
 #
 # Waits for the backend, then runs Chromium fullscreen on the touchscreen and
-# restarts it (after a short delay) whenever it exits or crashes.
+# restarts it (after a short delay) whenever it exits or crashes. If the backend
+# is not up within BACKEND_WAIT_S, Chromium shows the static offline page
+# (deploy/offline.html), which switches to the app by itself once it answers.
 # Output goes to sway's stdout, i.e. the journal (`journalctl -t sway`).
 #
 # UNVERIFIED on hardware: the Chromium flags (especially the Wayland IME ones
@@ -11,6 +13,8 @@ set -euo pipefail
 
 readonly URL="http://127.0.0.1/"          # loopback IP: allowed by the app's guard
 readonly STATE_URL="http://127.0.0.1/api/state"
+readonly OFFLINE_URL="file:///opt/pyrotv/deploy/offline.html"
+readonly BACKEND_WAIT_S=90
 readonly ENV_FILE="/etc/pyrotv.env"
 readonly PROFILE_DIR="/tmp/chromium-kiosk"
 readonly CACHE_DIR="/tmp/chromium-kiosk-cache"
@@ -42,15 +46,31 @@ find_chromium() {
     return 1
 }
 
+# Returns 0 once the backend answers, 1 after about BACKEND_WAIT_S seconds.
 wait_for_backend() {
-    local n=0
+    local n=0 deadline=$((SECONDS + BACKEND_WAIT_S))
     until curl -sf -o /dev/null --max-time 2 "$STATE_URL"; do
+        if (( SECONDS >= deadline )); then
+            log "backend not up after ${BACKEND_WAIT_S}s (journalctl -u pyrotv); showing the offline page"
+            return 1
+        fi
         n=$((n + 1))
         if (( n % 30 == 0 )); then
             log "still waiting for the backend at $STATE_URL (journalctl -u pyrotv)"
         fi
         sleep 1
     done
+}
+
+# The page Chromium should open: the app, or the offline page if the backend
+# does not come up (that page retries and switches to the app on its own).
+start_page() {
+    # Its log lines go to stderr: stdout is the page URL (command substitution).
+    if wait_for_backend >&2; then
+        printf '%s' "$URL"
+    else
+        printf '%s' "$OFFLINE_URL"
+    fi
 }
 
 main() {
@@ -94,20 +114,21 @@ main() {
         --disable-default-apps
     )
 
-    wait_for_backend
-    log "backend is up; starting $chromium"
+    local page
+    page="$(start_page)"
+    log "starting $chromium on $page"
 
     while true; do
         # A fresh profile each start: no "restore pages?" bubble after a crash.
         # /tmp lives in RAM under the overlay root, so keep it small.
         rm -rf -- "$PROFILE_DIR" "$CACHE_DIR"
         set +e
-        "$chromium" "${flags[@]}" "${extra_flags[@]}" "$URL"
+        "$chromium" "${flags[@]}" "${extra_flags[@]}" "$page"
         local rc=$?
         set -e
         log "chromium exited with status $rc; restarting in ${RESTART_DELAY}s"
         sleep "$RESTART_DELAY"
-        wait_for_backend
+        page="$(start_page)"
     done
 }
 

@@ -5,11 +5,12 @@
 # on a USB device is mounted at /media/usb-<kernel name> (e.g. /media/usb-sda1),
 # owned by user pyrotv so the backend can write the backup file. systemd
 # unmounts it again when the stick is pulled (--collect, unit bound to the
-# device). The SD card (mmcblk*) never matches ID_BUS=usb.
+# device). The SD card (mmcblk*) never matches ID_BUS=usb. A stick only ever
+# carries a JSON backup: nosuid,nodev,noexec.
 #
 # Installed to /etc/udev/rules.d/ by deploy/install.sh after replacing
 # @PYROTV_UID@ / @PYROTV_GID@ (vfat/exfat only accept numeric ids).
 # UNVERIFIED on the Pi: plug a stick, check `findmnt /media/usb-sda1`.
 
-ACTION=="add", SUBSYSTEM=="block", ENV{ID_BUS}=="usb", ENV{ID_FS_USAGE}=="filesystem", ENV{ID_FS_TYPE}=="vfat", RUN{program}+="/usr/bin/systemd-mount --no-block --collect --options=uid=@PYROTV_UID@,gid=@PYROTV_GID@,umask=0022,flush,noatime /dev/%k /media/usb-%k"
-ACTION=="add", SUBSYSTEM=="block", ENV{ID_BUS}=="usb", ENV{ID_FS_USAGE}=="filesystem", ENV{ID_FS_TYPE}=="exfat", RUN{program}+="/usr/bin/systemd-mount --no-block --collect --options=uid=@PYROTV_UID@,gid=@PYROTV_GID@,umask=0022,noatime /dev/%k /media/usb-%k"
+ACTION=="add", SUBSYSTEM=="block", ENV{ID_BUS}=="usb", ENV{ID_FS_USAGE}=="filesystem", ENV{ID_FS_TYPE}=="vfat", RUN{program}+="/usr/bin/systemd-mount --no-block --collect --options=uid=@PYROTV_UID@,gid=@PYROTV_GID@,umask=0022,flush,noatime,nosuid,nodev,noexec /dev/%k /media/usb-%k"
+ACTION=="add", SUBSYSTEM=="block", ENV{ID_BUS}=="usb", ENV{ID_FS_USAGE}=="filesystem", ENV{ID_FS_TYPE}=="exfat", RUN{program}+="/usr/bin/systemd-mount --no-block --collect --options=uid=@PYROTV_UID@,gid=@PYROTV_GID@,umask=0022,noatime,nosuid,nodev,noexec /dev/%k /media/usb-%k"

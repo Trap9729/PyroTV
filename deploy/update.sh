@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # PyroTV: update the app from this git checkout (git pull, reinstall, restart).
 #
-#   sudo ./deploy/update.sh [--no-pull] [--dry-run]
+#   sudo ./deploy/update.sh [--no-pull] [--dry-run] [--allow-other-os]
 #
+# --allow-other-os is passed on to install.sh (see README "Which OS image").
 # Only the app is updated: files in /opt/pyrotv, the venv (pip) and the
 # systemd unit; then pyrotv.service is restarted and the kiosk browser is
 # reloaded. Refuses to run while the overlay root is active, because the
@@ -18,12 +19,13 @@ REPO="$(cd "$SCRIPT_DIR/.." && pwd)"
 readonly REPO
 PULL=1
 DRY_RUN=0
+ALLOW_OTHER_OS=0
 
 log() { printf '[update] %s\n' "$*"; }
 die() { printf '[update] ERROR: %s\n' "$*" >&2; exit 1; }
 
 usage() {
-    sed -n '2,12p' "$0"
+    sed -n '2,14p' "$0"
     exit "${1:-0}"
 }
 
@@ -31,6 +33,7 @@ while (( $# )); do
     case "$1" in
         --no-pull) PULL=0 ;;
         --dry-run) DRY_RUN=1 ;;
+        --allow-other-os) ALLOW_OTHER_OS=1 ;;
         -h|--help) usage 0 ;;
         *) die "unknown option: $1" ;;
     esac
@@ -45,9 +48,8 @@ fi
 if (( ! DRY_RUN )); then
     [[ "$(id -u)" -eq 0 ]] || die "run as root (sudo)"
 fi
-[[ -d "$REPO/.git" ]] || die "$REPO is not a git checkout; copy the new sources there or use --no-pull"
-
 if (( PULL )); then
+    [[ -d "$REPO/.git" ]] || die "$REPO is not a git checkout; copy the new sources there or use --no-pull"
     # Pull as the checkout's owner (not root) so the files stay theirs.
     owner="$(stat -c %U "$REPO" 2>/dev/null || echo root)"
     log "git pull --ff-only in $REPO (as $owner)"
@@ -62,6 +64,7 @@ fi
 
 args=(--app-only --yes)
 if (( DRY_RUN )); then args+=(--dry-run); fi
+if (( ALLOW_OTHER_OS )); then args+=(--allow-other-os); fi
 bash "$SCRIPT_DIR/install.sh" "${args[@]}"
 
 log "reloading the kiosk browser (kiosk.sh restarts it)"

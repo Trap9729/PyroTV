@@ -421,8 +421,8 @@ setup_data_partition() {
         info "  3. otherwise, if the root already fills the card: abort (see README: cmdline.txt before first boot)"
         info "  4. otherwise (after --yes / typed YES):"
         info "       sfdisk --dump $DISK > /root/pyrotv-ptable-<date>.sfdisk"
-        info "       echo '<p2 start>,<${ROOT_SIZE_GIB} GiB in sectors>,83' | sfdisk --no-reread -N 2 $DISK"
-        info "       echo '<p3 start>,<rest of card>,83' | sfdisk --no-reread --append $DISK"
+        info "       echo '<p2 start>,<${ROOT_SIZE_GIB} GiB in sectors>,83' | sfdisk --no-reread --wipe never --wipe-partitions never -N 2 $DISK"
+        info "       echo '<p3 start>,<rest of card>,83' | sfdisk --no-reread --wipe never --wipe-partitions never --append $DISK"
         info "       partx -u $DISK; resize2fs $p2; mkfs.ext4 -L $DATA_LABEL -m 1 $p3 (only if blank)"
         add_fstab_and_mount "$p3"
         return 0
@@ -492,9 +492,9 @@ from cmdline.txt on the boot partition (see deploy/README.md), then re-run."
     info "commands:"
     info "  sfdisk --dump $DISK > $backup"
     if (( new_p2_size > P2_SIZE )); then
-        info "  echo '$P2_START,$new_p2_size,83' | sfdisk --no-reread -N 2 $DISK"
+        info "  echo '$P2_START,$new_p2_size,83' | sfdisk --no-reread --wipe never --wipe-partitions never -N 2 $DISK"
     fi
-    info "  echo '$p3_start,$p3_size,83' | sfdisk --no-reread --append $DISK"
+    info "  echo '$p3_start,$p3_size,83' | sfdisk --no-reread --wipe never --wipe-partitions never --append $DISK"
     info "  partx -u $DISK; udevadm settle; resize2fs $p2"
     info "  mkfs.ext4 -L $DATA_LABEL -m 1 $p3   (only if blkid finds nothing on it)"
     confirm_disk_change
@@ -505,10 +505,10 @@ from cmdline.txt on the boot partition (see deploy/README.md), then re-run."
         sfdisk --dump "$DISK" >"$backup"
         info "partition table backup: $backup (restore: sfdisk --no-reread $DISK < $backup)"
         if (( new_p2_size > P2_SIZE )); then
-            printf '%s,%s,83\n' "$P2_START" "$new_p2_size" | sfdisk --no-reread -N 2 "$DISK" \
+            printf '%s,%s,83\n' "$P2_START" "$new_p2_size" | sfdisk --no-reread --wipe never --wipe-partitions never -N 2 "$DISK" \
                 || die "sfdisk could not grow partition 2 (backup: $backup)"
         fi
-        printf '%s,%s,83\n' "$p3_start" "$p3_size" | sfdisk --no-reread --append "$DISK" \
+        printf '%s,%s,83\n' "$p3_start" "$p3_size" | sfdisk --no-reread --wipe never --wipe-partitions never --append "$DISK" \
             || die "sfdisk could not add partition 3 (backup: $backup); reboot and re-run"
         partx -u "$DISK" || warn "partx -u $DISK failed; the kernel may need a reboot to see the changes"
         udevadm settle || true

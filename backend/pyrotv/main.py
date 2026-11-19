@@ -3,7 +3,8 @@
 The systemd unit runs::
 
     uvicorn pyrotv.main:app --factory --host 0.0.0.0 --port 80 \
-        --no-proxy-headers --no-server-header
+        --no-proxy-headers --no-server-header --no-access-log \
+        --timeout-graceful-shutdown 3
 
 `create_app` needs a `Config`, so it cannot be used with `--factory` directly.
 """

@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="sv">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>PyroTV</title>
+  <link rel="icon" href="data:,">
+  <!-- Shown by deploy/kiosk.sh when the backend does not come up. Static, no
+       external resources. Retries every 5 s and opens the app once it answers. -->
+  <style>
+    html, body { margin: 0; height: 100%; background: #0b0e1a; color: #e8eaf2; }
+    body {
+      display: flex; align-items: center; justify-content: center;
+      font-family: system-ui, sans-serif; text-align: center; padding: 24px; box-sizing: border-box;
+    }
+    main { max-width: 40rem; }
+    h1 { font-size: 2rem; margin: 0 0 1rem; }
+    p { font-size: 1.2rem; line-height: 1.5; color: #b7bccd; margin: 0.5rem 0; }
+    code { color: #ffb347; }
+    .status { margin-top: 2rem; font-size: 1rem; color: #7d8296; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>PyroTV-tjänsten startar inte</h1>
+    <p>Kontrollera datapartitionen (<code>journalctl -u pyrotv</code>).</p>
+    <p class="status" id="status">Försöker igen var 5:e sekund …</p>
+  </main>
+  <script>
+    "use strict";
+    const APP = "http://127.0.0.1/";
+    function check() {
+      fetch(APP + "api/state", { mode: "no-cors", cache: "no-store" }).then(
+        () => location.replace(APP),
+        () => setTimeout(check, 5000),
+      );
+    }
+    setTimeout(check, 5000);
+  </script>
+</body>
+</html>

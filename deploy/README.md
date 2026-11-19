@@ -21,6 +21,7 @@ default) for managing the shop's PyroTV from a phone.
 | `pyrotv.env.example` | `/etc/pyrotv.env` | Paths, TV connector, audio sinks, mpv and Chromium flags |
 | `sway.conf` | `/home/pyrotv/.config/sway/config` | Kiosk compositor: outputs, touch mapping, window rules |
 | `kiosk.sh` | `/opt/pyrotv/deploy/` | Waits for the backend, keeps Chromium running |
+| `offline.html` | `/opt/pyrotv/deploy/` | Static page Chromium shows if the backend is not up after ~90 s; retries every 5 s |
 | `hotspot-setup.sh` | `/opt/pyrotv/deploy/` | NetworkManager profile `pyrotv-hotspot` + `/data/hotspot.json` |
 | `50-pyrotv-nm.rules` | `/etc/polkit-1/rules.d/` | Lets user `pyrotv` switch the hotspot with `nmcli` |
 | `99-pyrotv-usb.rules` | `/etc/udev/rules.d/` | Mounts FAT/exFAT USB sticks at `/media/usb-sdXN` for backup export/import |
@@ -242,6 +243,11 @@ piece (same spelling, case, spaces and Swedish letters):
 /data/media/images/<exact piece name>.jpg   (or .png)
 ```
 
+**Commit the real catalogue to the repo** as `catalogue/catalogue.json`.
+`install.sh` and `update.sh` copy `catalogue/` to `/opt/pyrotv/catalogue` with
+`rsync --delete`, so a catalogue edited only on the Pi is overwritten by the
+next install or update.
+
 Copy them while the root is writable or not, it does not matter: `/data` is
 always writable. 40 GB takes a while; either
 
@@ -296,6 +302,27 @@ Put the names in `/etc/pyrotv.env` and `sudo systemctl restart pyrotv`
 - If the Pi does not come up at all: put the card in a PC and remove
   `overlayroot=tmpfs:recurse=0` from `cmdline.txt` on `bootfs` to boot with a
   writable root.
+- If the backend does not answer within about 90 s after boot, the kiosk shows
+  a static page ("PyroTV-tjänsten startar inte", `deploy/offline.html`) that
+  retries every 5 s and opens the app by itself once it is up. Usual cause: the
+  data partition did not mount (`journalctl -u pyrotv`, `findmnt /data`).
+
+## Before the shop install: security and behaviour notes
+
+- **SSH is reachable from hotspot clients** (the hotspot is a normal network
+  for the Pi: sshd listens on every interface; only the web app filters
+  clients). Use a strong password or key-only login
+  (`PasswordAuthentication no` in `/etc/ssh/sshd_config.d/`), or disable SSH
+  for the shop (`sudo systemctl disable --now ssh`, with the overlay off).
+- **Remove the Imager's Wi-Fi profile** once the install is done, so the Pi
+  does not join the workshop network in the shop:
+  `nmcli con show` to find its name, then `sudo nmcli con delete <name>`
+  (overlay off, then reboot).
+- **The Settings gear is open to anyone at the touchscreen**, by design (no
+  PIN); the shop staff are trusted to keep customers out of it.
+- **A TV in standby may still report "connected" over HDMI**, so playback goes
+  to a dark TV. Switch the TV off at the mains (or unplug it) when it is not
+  meant to show videos; the touchscreen then plays locally.
 
 ## Updating (overlay on)
 
@@ -307,6 +334,7 @@ update:
 sudo /opt/pyrotv/deploy/overlay.sh disable && sudo reboot
 # ...after the reboot, root is writable:
 cd ~/PyroTV && sudo ./deploy/update.sh        # git pull, reinstall, restart
+#   (add --allow-other-os if the install needed it)
 #   (or edit /etc/pyrotv.env, apt upgrade, ...)
 sudo ./deploy/overlay.sh enable && sudo reboot
 ```

@@ -17,6 +17,8 @@ Description=PyroTV backend
 Requires=data.mount
 After=data.mount network.target user@@PYROTV_UID@.service
 Wants=user@@PYROTV_UID@.service
+# Never give up restarting: an appliance has nobody to run `systemctl reset-failed`.
+StartLimitIntervalSec=0
 
 [Service]
 Type=exec
@@ -26,9 +28,12 @@ EnvironmentFile=/etc/pyrotv.env
 WorkingDirectory=/opt/pyrotv
 # --no-proxy-headers: request.client.host is the access control (loopback and
 # the hotspot subnet only), so X-Forwarded-For must never be trusted.
-ExecStart=/opt/pyrotv/venv/bin/uvicorn pyrotv.main:app --factory --host 0.0.0.0 --port 80 --no-proxy-headers --no-server-header --no-access-log
+# --timeout-graceful-shutdown: open SSE streams never end by themselves; without
+# a limit uvicorn waits for them forever and the shutdown flush never runs.
+ExecStart=/opt/pyrotv/venv/bin/uvicorn pyrotv.main:app --factory --host 0.0.0.0 --port 80 --no-proxy-headers --no-server-header --no-access-log --timeout-graceful-shutdown 3
 Restart=always
 RestartSec=2
+TimeoutStopSec=20
 # Port 80 without root.
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE
