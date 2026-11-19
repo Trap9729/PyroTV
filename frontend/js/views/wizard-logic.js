@@ -24,6 +24,36 @@ export function diffEnabled(current, wanted) {
   return { enable, disable };
 }
 
+// The enabled-manufacturer list is written whole, so build it against a fresh
+// server list: the user's selection, plus every manufacturer the server has
+// enabled that this client has never seen (e.g. a custom manufacturer created
+// from a phone meanwhile). Ids the server no longer knows (a deleted custom
+// manufacturer) are dropped, or the PUT would be refused.
+export function mergeEnabled(serverMfrs, knownIds, selectedIds) {
+  const onServer = new Set(serverMfrs.map((m) => m.id));
+  const known = new Set(knownIds);
+  const out = selectedIds.filter((id) => onServer.has(id));
+  const seen = new Set(out);
+  for (const m of serverMfrs) {
+    if (m.enabled && !known.has(m.id) && !seen.has(m.id)) {
+      out.push(m.id);
+      seen.add(m.id);
+    }
+  }
+  return out;
+}
+
+// Merge a fresh manufacturer list into the local one: server order, local objects
+// kept for manufacturers already known, new ones appended; gone ones removed.
+export function mergeManufacturerList(localMfrs, serverMfrs) {
+  const local = new Map(localMfrs.map((m) => [m.id, m]));
+  const mfrs = serverMfrs.map((m) => local.get(m.id) ?? m);
+  const added = serverMfrs.filter((m) => !local.has(m.id));
+  const onServer = new Set(serverMfrs.map((m) => m.id));
+  const removed = localMfrs.filter((m) => !onServer.has(m.id));
+  return { mfrs, added, removed };
+}
+
 export function canAdvance(step, state = {}) {
   if (step === "shop") {
     const n = String(state.shopName ?? "").trim().length;

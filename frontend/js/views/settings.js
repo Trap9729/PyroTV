@@ -18,7 +18,7 @@ import { showToast } from "../toast.js";
 import { confirmDialog, dismissConfirm } from "./confirm.js";
 import { createCustomPanel } from "./custom-pieces.js";
 import { createHotspotCard } from "./hotspot-card.js";
-import { diffEnabled, groupByCategory, runLimited, SHOP_NAME_MAX } from "./wizard-logic.js";
+import { diffEnabled, groupByCategory, mergeEnabled, runLimited, SHOP_NAME_MAX } from "./wizard-logic.js";
 import { formatBytes, storagePercent } from "./settings-logic.js";
 
 const CONCURRENCY = 6;
@@ -249,7 +249,18 @@ export function renderSettings(root, ctx) {
         row.classList.toggle("off", !m.enabled);
         chain = chain.then(async () => {
           try {
-            await putSettings({ enabled_manufacturers: mfrs.filter((x) => x.enabled).map((x) => x.id) });
+            // Written whole: merge against a fresh list so a manufacturer created
+            // from a phone meanwhile is not silently switched off.
+            const server = await getManufacturers();
+            const known = mfrs.map((x) => x.id);
+            const ids = mergeEnabled(server, known, mfrs.filter((x) => x.enabled).map((x) => x.id));
+            await putSettings({ enabled_manufacturers: ids });
+            if (!alive) return;
+            for (const s of server) {
+              if (known.includes(s.id)) continue;
+              mfrs.push(s);
+              if (box.isConnected) box.append(mfrRow(s));
+            }
           } catch {
             m.enabled = prev;
             paintSwitch(toggle, prev);

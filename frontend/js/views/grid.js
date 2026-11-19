@@ -182,6 +182,17 @@ export function renderGrid(root, ctx) {
       if (disposed || seq !== requestSeq) return;
       console.error("loading pieces failed", err);
       showToast(t("grid.loadError"));
+      if (tiles.childElementCount === 0) {
+        // Nothing to show at all: offer a retry instead of a blank screen.
+        const box = el("div", "empty-box");
+        box.append(icon("i-rocket", "empty-icon"), el("h2", "", t("grid.loadError")));
+        const retry = el("button", "btn btn-primary", t("common.retry"));
+        retry.type = "button";
+        retry.addEventListener("click", () => load());
+        box.append(retry);
+        empty.replaceChildren(box);
+        empty.hidden = false;
+      }
     } finally {
       if (!disposed && seq === requestSeq) view.classList.remove("loading");
     }

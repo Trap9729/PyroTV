@@ -8,7 +8,11 @@ import {
   validateCustomForm,
   customErrorMessage,
   jobFailureText,
+  uploadsLost,
   NEW_VALUE,
+  NAME_MAX,
+  CATEGORY_MAX,
+  MANUFACTURER_MAX,
 } from "../js/views/settings-logic.js";
 import { UploadError } from "../js/uploader.js";
 import { ApiError } from "../js/api.js";
@@ -57,7 +61,27 @@ test("validateCustomForm lists what is missing", () => {
   assert.deepEqual(validateCustomForm({ ...ok, video: null }).errors, ["video"]);
   assert.deepEqual(validateCustomForm({ ...ok, mfrChoice: NEW_VALUE, newMfr: " " }).errors, ["manufacturer"]);
   assert.deepEqual(validateCustomForm({ ...ok, catChoice: NEW_VALUE, newCat: "" }).errors, ["category"]);
-  assert.deepEqual(validateCustomForm({ ...ok, name: "x".repeat(201) }).errors, ["name"]);
+  assert.deepEqual(validateCustomForm({ ...ok, name: "x".repeat(81) }).errors, ["name"]);
+});
+
+test("validateCustomForm uses the backend limits: name 80, category 40, manufacturer 40", () => {
+  assert.deepEqual([NAME_MAX, CATEGORY_MAX, MANUFACTURER_MAX], [80, 40, 40]);
+  assert.equal(validateCustomForm({ ...ok, name: "x".repeat(80) }).ok, true);
+  const fresh = { ...ok, mfrChoice: NEW_VALUE, catChoice: NEW_VALUE };
+  assert.equal(validateCustomForm({ ...fresh, newMfr: "m".repeat(40), newCat: "c".repeat(40) }).ok, true);
+  assert.deepEqual(validateCustomForm({ ...fresh, newMfr: "m".repeat(41), newCat: "c" }).errors, ["manufacturer"]);
+  assert.deepEqual(validateCustomForm({ ...fresh, newMfr: "m", newCat: "c".repeat(41) }).errors, ["category"]);
+});
+
+test("uploadsLost: only unknown/incomplete uploads force a re-upload", () => {
+  assert.equal(uploadsLost(new ApiError(404, { detail: "unknown upload" })), true);
+  assert.equal(uploadsLost(new ApiError(409, { detail: "upload is incomplete" })), true);
+  assert.equal(uploadsLost(new ApiError(404, { detail: "unknown manufacturer" })), false);
+  assert.equal(uploadsLost(new ApiError(422, { detail: "name must be 1..80 characters" })), false);
+  assert.equal(uploadsLost(new ApiError(422, { detail: [{ msg: "too long" }] })), false);
+  assert.equal(uploadsLost(new ApiError(409, { detail: "a piece with that name already exists" })), false);
+  assert.equal(uploadsLost(new TypeError("Failed to fetch")), false);
+  assert.equal(uploadsLost(undefined), false);
 });
 
 test("customErrorMessage maps statuses to Swedish text", () => {

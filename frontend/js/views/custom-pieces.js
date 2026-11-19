@@ -19,6 +19,9 @@ import { groupByCategory } from "./wizard-logic.js";
 import {
   NEW_VALUE,
   NAME_MAX,
+  CATEGORY_MAX,
+  MANUFACTURER_MAX,
+  uploadsLost,
   formatBytes,
   validateCustomForm,
   customErrorMessage,
@@ -44,10 +47,10 @@ function field(labelText, control, id) {
   return wrap;
 }
 
-function textInput(placeholder) {
+function textInput(placeholder, maxLength) {
   const i = el("input", "set-input");
   i.type = "text";
-  i.maxLength = NAME_MAX;
+  i.maxLength = maxLength;
   i.autocomplete = "off";
   i.spellcheck = false;
   if (placeholder) i.placeholder = placeholder;
@@ -164,15 +167,15 @@ export function createCustomPanel(host, env = {}) {
   form.append(el("h3", "set-h3", t("custom.formTitle")));
 
   const mfrSel = el("select", "set-select");
-  const newMfr = textInput(t("custom.newMfrPlaceholder"));
+  const newMfr = textInput(t("custom.newMfrPlaceholder"), MANUFACTURER_MAX);
   const mfrField = field(t("custom.manufacturer"), mfrSel, "cp-mfr");
   const newMfrField = field(t("custom.newMfr"), newMfr, "cp-newmfr");
 
-  const nameInput = textInput(t("custom.namePlaceholder"));
+  const nameInput = textInput(t("custom.namePlaceholder"), NAME_MAX);
   const nameField = field(t("custom.name"), nameInput, "cp-name");
 
   const catSel = el("select", "set-select");
-  const newCat = textInput(t("custom.newCatPlaceholder"));
+  const newCat = textInput(t("custom.newCatPlaceholder"), CATEGORY_MAX);
   const catField = field(t("custom.category"), catSel, "cp-cat");
   const newCatField = field(t("custom.newCat"), newCat, "cp-newcat");
 
@@ -402,7 +405,7 @@ export function createCustomPanel(host, env = {}) {
       try {
         job = await createCustom(body);
       } catch (err) {
-        if (err?.status === 404 || err?.status === 422) cache = freshCache();
+        if (uploadsLost(err)) cache = freshCache();
         throw err;
       }
       if (!alive) return;
@@ -495,9 +498,9 @@ export function createCustomPanel(host, env = {}) {
     const edit = () => {
       li.replaceChildren();
       const box = el("div", "set-edit");
-      const n = textInput();
+      const n = textInput(undefined, NAME_MAX);
       n.value = c.name;
-      const cat = textInput();
+      const cat = textInput(undefined, CATEGORY_MAX);
       cat.value = c.category;
       const err = el("p", "set-status error");
       err.hidden = true;

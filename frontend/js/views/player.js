@@ -2,12 +2,11 @@ import { play, playerPause, playerSeek, playerStop, recordView } from "../api.js
 import { el, icon } from "../dom.js";
 import { createDoubleTap, SEEK_STEP } from "../gestures.js";
 import { t } from "../i18n.js";
-import { shouldLeaveOnStopped } from "./player-logic.js";
+import { eventIsForView, shouldLeaveOnStopped, tvViewDue, VIEW_AFTER_S } from "./player-logic.js";
 import { showToast } from "../toast.js";
 import { renderGrid } from "./grid.js";
 
 const BAR_HIDE_MS = 3000;
-const VIEW_AFTER_S = 5; // seconds of actual playing time before a view is counted
 const MOVE_SLOP_PX = 12;
 const LABEL_RESET_MS = 700;
 const RIPPLE_MS = 450;
@@ -305,6 +304,7 @@ function renderLocalMode(root, np, leave) {
       if (dt > 0 && dt < 1.5) played += dt;
     }
     lastTime = cur;
+    // Local mode counts actual playing time, not the position (seeks are skipped).
     if (!viewSent && played >= VIEW_AFTER_S) {
       viewSent = true;
       recordView(np.key).catch((err) => console.error("recordView failed", err));
@@ -381,6 +381,7 @@ function renderTvMode(root, ctx, np, leave) {
   root.append(popup);
 
   let state = "playing";
+  let viewSent = false;
   function renderState() {
     const playing = state === "playing";
     pause.replaceChildren(icon(playing ? "i-pause" : "i-play"));
@@ -407,6 +408,11 @@ function renderTvMode(root, ctx, np, leave) {
   });
 
   const unsubPlayer = ctx.subscribe("player", (ev) => {
+    if (!eventIsForView(ev.key, np.key)) return; // a newer playback's progress
+    if (tvViewDue({ viewSent, state: ev.state, position: ev.position })) {
+      viewSent = true;
+      recordView(np.key).catch((err) => console.error("recordView failed", err));
+    }
     if (ev.state === "playing" || ev.state === "paused") {
       state = ev.state;
       renderState();
@@ -418,7 +424,12 @@ function renderTvMode(root, ctx, np, leave) {
   });
   const unsubStopped = ctx.subscribe("stopped", (ev) => {
     // Checked when the event arrives: a newer playback may have superseded this view.
-    const d = shouldLeaveOnStopped({ viewKey: np.key, nowPlayingKey: ctx.nowPlaying?.key, reason: ev.reason });
+    const d = shouldLeaveOnStopped({
+      viewKey: np.key,
+      nowPlayingKey: ctx.nowPlaying?.key,
+      reason: ev.reason,
+      eventKey: ev.key,
+    });
     if (d.leave) leave(d.notice ?? undefined);
   });
 

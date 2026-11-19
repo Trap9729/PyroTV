@@ -86,7 +86,16 @@ function render() {
   cleanup = typeof result === "function" ? result : null;
 }
 
+const BOOT_RETRY_MS = 5000;
+let bootRetry = null;
+
 function renderBootError() {
+  // An unattended kiosk must recover by itself once the backend is up.
+  clearTimeout(bootRetry);
+  bootRetry = setTimeout(() => {
+    bootRetry = null;
+    boot();
+  }, BOOT_RETRY_MS);
   root.replaceChildren();
   root.dataset.view = "error";
   const panel = document.createElement("div");
@@ -104,6 +113,8 @@ function renderBootError() {
   btn.textContent = t("common.retry");
   btn.addEventListener("click", () => {
     btn.disabled = true;
+    clearTimeout(bootRetry);
+    bootRetry = null;
     boot();
   });
   card.append(h, p, btn);

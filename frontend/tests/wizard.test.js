@@ -8,8 +8,37 @@ import {
   groupByCategory,
   formatPin,
   runLimited,
+  mergeEnabled,
+  mergeManufacturerList,
   OTHER_CATEGORY,
 } from "../js/views/wizard-logic.js";
+
+test("mergeEnabled keeps the selection and adds unseen server-enabled manufacturers", () => {
+  const server = [
+    { id: "a", enabled: true },
+    { id: "b", enabled: false },
+    { id: "c-ny", enabled: true }, // created from a phone meanwhile
+    { id: "c-off", enabled: false }, // unseen but not enabled: stays off
+  ];
+  assert.deepEqual(mergeEnabled(server, ["a", "b"], ["b"]), ["b", "c-ny"]);
+  // a known manufacturer the user switched off stays off even if the server has it on
+  assert.deepEqual(mergeEnabled(server, ["a", "b", "c-ny"], ["b"]), ["b"]);
+  // ids the server no longer has are dropped (the PUT would be refused)
+  assert.deepEqual(mergeEnabled(server, ["a", "gone"], ["a", "gone"]), ["a", "c-ny"]);
+  assert.deepEqual(mergeEnabled([], [], []), []);
+});
+
+test("mergeManufacturerList keeps local objects, appends new, drops gone", () => {
+  const localA = { id: "a", enabled: false, local: true };
+  const localGone = { id: "c-x" };
+  const serverA = { id: "a", enabled: true };
+  const serverNew = { id: "c-ny", enabled: true };
+  const r = mergeManufacturerList([localA, localGone], [serverA, serverNew]);
+  assert.deepEqual(r.mfrs, [localA, serverNew]);
+  assert.strictEqual(r.mfrs[0], localA);
+  assert.deepEqual(r.added, [serverNew]);
+  assert.deepEqual(r.removed, [localGone]);
+});
 
 test("wizardSteps lists one pieces step per manufacturer in order", () => {
   assert.deepEqual(wizardSteps(["lesli", "nico"]), [

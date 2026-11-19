@@ -18,6 +18,8 @@ import {
   diffEnabled,
   canAdvance,
   groupByCategory,
+  mergeEnabled,
+  mergeManufacturerList,
   runLimited,
   SHOP_NAME_MAX,
 } from "./wizard-logic.js";
@@ -133,6 +135,38 @@ export function renderWizard(root, ctx) {
     show();
   }
 
+  // Fold a fresh server list into S: new manufacturers (e.g. created from a
+  // phone meanwhile) come in selected; the user's existing choices are kept;
+  // manufacturers gone from the server are dropped. Returns true on any change.
+  function adoptManufacturers(server) {
+    const { mfrs, added, removed } = mergeManufacturerList(S.mfrs, server);
+    S.mfrs = mfrs;
+    for (const m of removed) {
+      S.selected.delete(m.id);
+      S.backend.delete(m.id);
+      S.ticks.delete(m.id);
+    }
+    for (const m of added) {
+      const on = new Set(m.pieces.filter((p) => p.enabled).map((p) => p.key));
+      S.selected.add(m.id);
+      S.backend.set(m.id, on);
+      S.ticks.set(m.id, new Set(on));
+    }
+    return added.length > 0 || removed.length > 0;
+  }
+
+  async function refreshManufacturers() {
+    const my = token;
+    let server;
+    try {
+      server = await getManufacturers();
+    } catch {
+      return; // keep the list we have; apply() re-checks before saving
+    }
+    if (!alive || my !== token || busy || S.stepId !== "manufacturers") return;
+    if (adoptManufacturers(server)) show();
+  }
+
   // ----- steps -----
   function show() {
     token++;
@@ -141,7 +175,10 @@ export function renderWizard(root, ctx) {
     body.scrollTop = 0;
     const id = S.stepId;
     if (id === "shop") showShop();
-    else if (id === "manufacturers") showManufacturers();
+    else if (id === "manufacturers") {
+      showManufacturers();
+      refreshManufacturers();
+    }
     else if (id.startsWith("pieces:")) showPieces(id.slice("pieces:".length));
     else if (id === "custom") showCustom();
     else showFinish();
@@ -396,7 +433,13 @@ export function renderWizard(root, ctx) {
       await putSettings({ shop_name: S.shopName.trim() });
       await ctx.refreshState();
     } else if (id === "manufacturers") {
-      await putSettings({ enabled_manufacturers: selectedIds() });
+      // Written whole: merge against a fresh list so a manufacturer created from
+      // a phone meanwhile is not silently switched off.
+      const server = await getManufacturers();
+      const ids = mergeEnabled(server, S.mfrs.map((m) => m.id), selectedIds());
+      adoptManufacturers(server);
+      for (const m of S.mfrs) if (!ids.includes(m.id)) S.selected.delete(m.id);
+      await putSettings({ enabled_manufacturers: ids });
     } else if (id.startsWith("pieces:")) {
       if (!(await applyPieces(id.slice("pieces:".length)))) throw new Error("pieces");
     }

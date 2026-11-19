@@ -2,7 +2,10 @@
 import { t } from "../i18n.js";
 
 export const NEW_VALUE = "__new__";
-export const NAME_MAX = 200;
+// Same limits as the backend (customs.py MAX_NAME / MAX_CATEGORY / MAX_MANUFACTURER).
+export const NAME_MAX = 80;
+export const CATEGORY_MAX = 40;
+export const MANUFACTURER_MAX = 40;
 export const AUTOOFF_OPTIONS = [0, 15, 30, 60, 120];
 
 // 12.4 GiB -> "12,4 GB" (binary steps, Swedish decimal comma).
@@ -32,16 +35,24 @@ export function validateCustomForm(form) {
   if (!name || name.length > NAME_MAX) errors.push("name");
   if (form.mfrChoice === NEW_VALUE) {
     const m = String(form.newMfr ?? "").trim();
-    if (!m || m.length > NAME_MAX) errors.push("manufacturer");
+    if (!m || m.length > MANUFACTURER_MAX) errors.push("manufacturer");
   } else if (!form.mfrChoice) {
     errors.push("manufacturer");
   }
   if (form.catChoice === NEW_VALUE || !form.catChoice) {
     const c = String(form.newCat ?? "").trim();
-    if (!c || c.length > NAME_MAX) errors.push("category");
+    if (!c || c.length > CATEGORY_MAX) errors.push("category");
   }
   if (!form.video) errors.push("video");
   return { ok: errors.length === 0, errors };
+}
+
+// After POST /api/custom failed: are the uploaded files gone on the server, so the
+// next attempt must upload again? Only for these two answers; a 422 (invalid field)
+// or an unknown-manufacturer 404 keeps the uploads for the corrected retry.
+const UPLOAD_GONE_DETAILS = new Set(["unknown upload", "upload is incomplete"]);
+export function uploadsLost(err) {
+  return UPLOAD_GONE_DETAILS.has(err?.body?.detail);
 }
 
 // Any error thrown while uploading / creating a custom piece -> Swedish sentence.
