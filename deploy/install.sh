@@ -297,6 +297,14 @@ EOF
         fi
     fi
 
+    # Friendly hotspot name. NetworkManager's shared-mode dnsmasq reads this
+    # directory, so hotspot clients resolve pyrotv.upload to the Pi. (Keep it in
+    # sync with HOTSPOT_HOSTNAME in backend/pyrotv/hotspot.py.)
+    write_file /etc/NetworkManager/dnsmasq-shared.d/pyrotv.conf 0644 root:root <<'EOF'
+# PyroTV: name for the admin page on the hotspot network.
+address=/pyrotv.upload/10.42.0.1
+EOF
+
     # Chromium managed policy: no "Translate this page?" bubble over the kiosk
     # (the page is Swedish but Chromium's own UI language is not). Both policy
     # directories are written: Debian's chromium reads /etc/chromium/..., some

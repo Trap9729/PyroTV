@@ -20,10 +20,13 @@ def test_hotspot_pin_lifecycle(make_client):
     with make_client(hotspot_run=run) as c:
         body = c.get("/api/hotspot").json()
         assert body["on"] is False and body["pin"] is None and body["qr_svg"] is None
-        assert body["url"] == "http://10.42.0.1"
+        assert body["url"] == "http://pyrotv.upload"
+        assert body["ip_url"] == "http://10.42.0.1"
+        assert body["url_qr_svg"] is None
         r = c.post("/api/hotspot", json={"on": True}).json()
         assert r["on"] is True and len(r["pin"]) == 8 and r["pin"].isdigit()
         assert r["qr_svg"].startswith("<svg")
+        assert r["url_qr_svg"].startswith("<svg") and r["url_qr_svg"] != r["qr_svg"]
         assert c.get("/api/hotspot").json()["pin"] == r["pin"]
         r2 = c.post("/api/hotspot", json={"on": False}).json()
         assert r2["on"] is False and r2["pin"] is None

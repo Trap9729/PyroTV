@@ -425,7 +425,10 @@ fix the files here where reality differs.
       switching it on/off from Settings works as user `pyrotv` through the
       polkit rule (no "Not authorized" in `journalctl -u pyrotv`); a phone
       joins with the shown PIN/QR and gets a `10.42.0.x` address; the admin
-      page loads at `http://10.42.0.1` and `http://pyrotv.local`; brcmfmac AP
+      page loads at `http://10.42.0.1`, `http://pyrotv.upload` (the hotspot's dnsmasq
+      answers it, see `/etc/NetworkManager/dnsmasq-shared.d/pyrotv.conf`) and
+      `http://pyrotv.local`; the Settings Wi-Fi card shows two QR codes (join the
+      Wi-Fi, open the page); brcmfmac AP
       mode is stable with WPA2/CCMP on channel 6. Trim the polkit action list
       to what is really needed.
 - [ ] **USB backup**: a FAT/exFAT stick mounts at `/media/usb-sda1` owned by

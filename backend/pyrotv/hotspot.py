@@ -19,6 +19,11 @@ log = logging.getLogger(__name__)
 CONNECTION = "pyrotv-hotspot"
 DEFAULT_SSID = "PyroTV"
 DEFAULT_AUTOOFF_MINUTES = 30
+# Friendly name for the admin page: resolved by the hotspot's own DNS (dnsmasq via
+# NetworkManager, see deploy/install.sh) to HOTSPOT_IP. Typed by hand only; the QR
+# code carries the IP, which also works when a phone sends DNS over mobile data.
+HOTSPOT_HOSTNAME = "pyrotv.upload"
+HOTSPOT_IP = "10.42.0.1"
 
 
 class HotspotError(Exception):
@@ -48,6 +53,11 @@ _WIFI_SPECIAL = str.maketrans({c: "\\" + c for c in '\\;,:"'})
 
 def wifi_payload(ssid: str, pin: str) -> str:
     return f"WIFI:T:WPA;S:{ssid.translate(_WIFI_SPECIAL)};P:{pin.translate(_WIFI_SPECIAL)};;"
+
+
+def url_qr_svg(url: str) -> str:
+    """Inline SVG QR code that opens `url`."""
+    return str(segno.make(url, error="m").svg_inline(scale=8, border=2))
 
 
 class Hotspot:
