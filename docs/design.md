@@ -84,7 +84,7 @@ Add `total_mem=1024` to `/boot/firmware/config.txt` and reboot; `free -m` should
 - Settings export and import to a USB stick.
 
 ### Phone web page
-- Reached at `http://pyrotv.local` or a fixed IP after joining the hotspot.
+- Reached at `http://pyrotv.upload` (hotspot DNS), `http://pyrotv.local` or the fixed IP `http://10.42.0.1` after joining the hotspot. The Wi-Fi card shows two QR codes: one joins the Wi-Fi, one opens the page (it carries the IP, which works even when a phone sends DNS over mobile data).
 - Everything in Settings, plus upload with a progress bar for video and image, name and category.
 - Large uploads are chunked, so a dropped connection resumes.
 

@@ -22,7 +22,15 @@ from .config import Config
 from .customs import CustomService, DuplicateName, UnknownManufacturer, cleanup_custom_orphans
 from .events import EventBus
 from .backup import BACKUP_NAME, export_backup, find_usb_mount, import_backup
-from .hotspot import DEFAULT_AUTOOFF_MINUTES, Hotspot, HotspotError, run_nmcli
+from .hotspot import (
+    DEFAULT_AUTOOFF_MINUTES,
+    HOTSPOT_HOSTNAME,
+    HOTSPOT_IP,
+    Hotspot,
+    HotspotError,
+    run_nmcli,
+    url_qr_svg,
+)
 from .library import Library
 from .network import is_allowed_client
 from .outputs import OutputWatcher
@@ -454,7 +462,8 @@ def _custom_router() -> APIRouter:
     return r
 
 
-HOTSPOT_URL = "http://10.42.0.1"
+HOTSPOT_URL = f"http://{HOTSPOT_HOSTNAME}"
+HOTSPOT_IP_URL = f"http://{HOTSPOT_IP}"
 
 
 class HotspotBody(BaseModel):
@@ -472,7 +481,9 @@ def _hotspot_json(h: Hotspot, store: Store) -> dict:
         "ssid": h.ssid,
         "pin": pin,
         "url": HOTSPOT_URL,
-        "qr_svg": h.qr_svg(),
+        "ip_url": HOTSPOT_IP_URL,
+        "qr_svg": h.qr_svg(),  # joins the Wi-Fi
+        "url_qr_svg": url_qr_svg(HOTSPOT_IP_URL) if pin is not None else None,  # opens the page
         "autooff_minutes": autooff,
     }
 

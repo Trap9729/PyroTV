@@ -15,7 +15,7 @@ function button(cls, text, onClick) {
   return b;
 }
 
-function qrNode(svgText) {
+function qrNode(svgText, label) {
   if (!svgText) return null;
   // The backend SVG carries no xmlns; without it XML parsing yields non-SVG elements.
   const xml = /xmlns=/.test(svgText.slice(0, 300))
@@ -34,7 +34,7 @@ function qrNode(svgText) {
   node.removeAttribute("height");
   node.classList.add("wiz-qr-svg");
   node.setAttribute("role", "img");
-  node.setAttribute("aria-label", t("wizard.custom.qr"));
+  node.setAttribute("aria-label", label);
   const box = el("div", "wiz-qr");
   box.append(node);
   return box;
@@ -137,13 +137,25 @@ export function createHotspotCard({ onBusy = () => {}, autoOff = false } = {}) {
       row(t("wizard.custom.pin"), formatPin(h.pin), "wiz-pin"),
       el("p", "wiz-steps", t("wizard.custom.step2")),
       row(t("wizard.custom.url"), h.url ?? ""),
+      ...(h.ip_url ? [row(t("wizard.custom.ipUrl"), h.ip_url, "wiz-v-small")] : []),
       el("p", "wiz-note", t("wizard.custom.newPin")),
     );
     if (autoOff) info.append(autoOffNode());
     info.append(button("btn btn-ghost wiz-big", t("wizard.custom.stop"), () => toggle(false)));
     f.append(info);
-    const qr = qrNode(h.qr_svg);
-    if (qr) f.append(qr);
+    // Two codes, in the order of the steps: join the Wi-Fi, then open the page.
+    const qrs = el("div", "wiz-qrs");
+    for (const [svg, cap, label] of [
+      [h.qr_svg, t("wizard.custom.capWifi"), t("wizard.custom.qrWifi")],
+      [h.url_qr_svg, t("wizard.custom.capSite"), t("wizard.custom.qr")],
+    ]) {
+      const qr = qrNode(svg, label);
+      if (!qr) continue;
+      const item = el("div", "wiz-qr-item");
+      item.append(qr, el("span", "wiz-qr-cap", cap));
+      qrs.append(item);
+    }
+    if (qrs.childElementCount) f.append(qrs);
     return [f];
   };
 

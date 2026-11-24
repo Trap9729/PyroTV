@@ -198,7 +198,7 @@
 /* ----- custom / hotspot ----- */
 .wiz-hot { grid-template-columns: 1fr; justify-items: center; text-align: center; }
 .wiz-hot:has(.wiz-hot-info) { grid-template-columns: minmax(0, 1fr) auto; justify-items: stretch; text-align: left; align-items: center; gap: 28px; }
-.wiz-hot-info { display: grid; gap: 14px; justify-items: start; }
+.wiz-hot-info { display: grid; gap: 14px; justify-items: start; min-width: 0; }
 .wiz-steps { margin: 0; font-size: 1.1rem; color: var(--text-2); }
 .wiz-kv { display: grid; gap: 2px; }
 .wiz-k { font-size: 0.9rem; font-weight: 650; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-3); }
@@ -216,7 +216,11 @@
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-.wiz-qr { background: #fff; padding: 14px; border-radius: var(--radius); width: 244px; height: 244px; }
+.wiz-qr { background: #fff; padding: 12px; border-radius: var(--radius); width: 172px; height: 172px; }
+.wiz-qrs { display: flex; gap: 14px; align-items: flex-start; justify-content: center; }
+.wiz-qr-item { display: grid; gap: 8px; justify-items: center; }
+.wiz-qr-cap { font-size: 1rem; font-weight: 650; color: var(--text-2); }
+.wiz-v-small { font-size: 1.1rem; color: var(--text-2); }
 .wiz-qr-svg { display: block; width: 100%; height: 100%; }
 .wiz-sub { margin: 0; font-size: 1.15rem; color: var(--text-2); }
 .wiz-custom-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
@@ -242,7 +246,7 @@
   .wiz-hot-info { justify-items: start; width: 100%; }
   .wiz-pin { font-size: 2.4rem; padding: 6px 16px; }
   .wiz-input { font-size: 1.3rem; height: 64px; }
-  .wiz-qr { width: 200px; height: 200px; }
+  .wiz-qr { width: 150px; height: 150px; }
   .wiz-sticky { top: -22px; }
   .wiz-count { flex-basis: 100%; }
 }
