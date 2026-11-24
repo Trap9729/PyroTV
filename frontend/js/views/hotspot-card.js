@@ -125,37 +125,53 @@ export function createHotspotCard({ onBusy = () => {}, autoOff = false } = {}) {
   const nodesFor = (h) => {
     if (!h?.on) return [offNodes()];
     const f = document.createDocumentFragment();
-    const info = el("div", "wiz-hot-info");
     const row = (label, value, cls) => {
       const r = el("div", "wiz-kv");
       r.append(el("span", "wiz-k", label), el("span", `wiz-v ${cls || ""}`, value));
       return r;
     };
-    info.append(
-      el("p", "wiz-steps", t("wizard.custom.step1")),
-      row(t("wizard.custom.ssid"), h.ssid ?? ""),
-      row(t("wizard.custom.pin"), formatPin(h.pin), "wiz-pin"),
-      el("p", "wiz-steps", t("wizard.custom.step2")),
-      row(t("wizard.custom.url"), h.url ?? ""),
-      ...(h.ip_url ? [row(t("wizard.custom.ipUrl"), h.ip_url, "wiz-v-small")] : []),
-      el("p", "wiz-note", t("wizard.custom.newPin")),
-    );
-    if (autoOff) info.append(autoOffNode());
-    info.append(button("btn btn-ghost wiz-big", t("wizard.custom.stop"), () => toggle(false)));
-    f.append(info);
-    // Two codes, in the order of the steps: join the Wi-Fi, then open the page.
-    const qrs = el("div", "wiz-qrs");
-    for (const [svg, cap, label] of [
-      [h.qr_svg, t("wizard.custom.capWifi"), t("wizard.custom.qrWifi")],
-      [h.url_qr_svg, t("wizard.custom.capSite"), t("wizard.custom.qr")],
-    ]) {
+    // One section per step, each with its own code beside it. The page code sits well
+    // below the Wi-Fi code so the two are not mixed up when scanning.
+    const section = (infoNodes, svg, cap, label) => {
+      const sec = el("div", "wiz-hot-sec");
+      const info = el("div", "wiz-hot-info");
+      info.append(...infoNodes);
+      sec.append(info);
       const qr = qrNode(svg, label);
-      if (!qr) continue;
-      const item = el("div", "wiz-qr-item");
-      item.append(qr, el("span", "wiz-qr-cap", cap));
-      qrs.append(item);
-    }
-    if (qrs.childElementCount) f.append(qrs);
+      if (qr) {
+        const item = el("div", "wiz-qr-item");
+        item.append(qr, el("span", "wiz-qr-cap", cap));
+        sec.append(item);
+      }
+      return sec;
+    };
+    f.append(
+      section(
+        [
+          el("p", "wiz-steps", t("wizard.custom.step1")),
+          row(t("wizard.custom.ssid"), h.ssid ?? ""),
+          row(t("wizard.custom.pin"), formatPin(h.pin), "wiz-pin"),
+        ],
+        h.qr_svg,
+        t("wizard.custom.capWifi"),
+        t("wizard.custom.qrWifi"),
+      ),
+      section(
+        [
+          el("p", "wiz-steps", t("wizard.custom.step2")),
+          row(t("wizard.custom.url"), h.url ?? ""),
+          ...(h.ip_url ? [row(t("wizard.custom.ipUrl"), h.ip_url, "wiz-v-small")] : []),
+        ],
+        h.url_qr_svg,
+        t("wizard.custom.capSite"),
+        t("wizard.custom.qr"),
+      ),
+    );
+    const foot = el("div", "wiz-hot-foot");
+    foot.append(el("p", "wiz-note", t("wizard.custom.newPin")));
+    if (autoOff) foot.append(autoOffNode());
+    foot.append(button("btn btn-ghost wiz-big", t("wizard.custom.stop"), () => toggle(false)));
+    f.append(foot);
     return [f];
   };
 
