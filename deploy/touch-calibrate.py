@@ -94,7 +94,12 @@ def wait_for_tap(fd, xc, yc):
     slot = 0
     while True:
         released = False
-        for off in range(0, len(data := os.read(fd, EVENT.size * 64)) - EVENT.size + 1, EVENT.size):
+        select.select([fd], [], [])  # the device is non-blocking: wait until it has events
+        try:
+            data = os.read(fd, EVENT.size * 64)
+        except BlockingIOError:
+            continue
+        for off in range(0, len(data) - EVENT.size + 1, EVENT.size):
             _s, _u, etype, code, value = EVENT.unpack_from(data, off)
             if etype == EV_ABS:
                 if code == ABS_MT_SLOT:
