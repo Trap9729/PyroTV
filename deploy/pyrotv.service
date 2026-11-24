@@ -41,7 +41,7 @@ CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 # Conservative hardening that leaves mpv/Wayland/PipeWire/nmcli working:
 # - /run/user/<uid> (Wayland + PipeWire sockets) is untouched by these.
 # - nmcli talks to NetworkManager over the system D-Bus (polkit rule
-#   50-pyrotv-nm.rules), so no privileges are needed for the hotspot.
+#   00-pyrotv-nm.rules), so no privileges are needed for the hotspot.
 # - ProtectSystem=full makes /usr, /boot and /etc read-only; /data stays
 #   writable (ReadWritePaths is explicit documentation of that).
 # - /dev is NOT made private: mpv needs /dev/dri (groups video/render).

@@ -119,7 +119,7 @@
   border: 2px solid var(--line);
   transition: transform 120ms var(--ease);
 }
-.wiz-mfr:active { transform: scale(0.97); }
+.wiz-mfr:active { filter: brightness(0.82); }
 .wiz-mfr[aria-pressed="true"] { border-color: var(--accent); background: var(--surface-2); }
 .wiz-mfr-name { font-size: 1.35rem; font-weight: 700; overflow-wrap: anywhere; }
 .wiz-mfr-meta { color: var(--text-2); font-size: 1rem; }

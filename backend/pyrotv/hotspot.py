@@ -31,10 +31,16 @@ def _default_gen_pin() -> str:
 
 def run_nmcli(args: list[str]) -> int:
     try:
-        return subprocess.run(args, capture_output=True, timeout=20).returncode
+        proc = subprocess.run(args, capture_output=True, timeout=20)
     except (FileNotFoundError, subprocess.TimeoutExpired, OSError) as e:
         log.warning("command %s failed: %s", args[:3], e)
         return 1
+    if proc.returncode != 0:
+        # nmcli explains itself on stderr ("Not authorized", "Device not ready"...);
+        # without this, journalctl only shows an exit code. Never log the psk argument.
+        detail = proc.stderr.decode("utf-8", "replace").strip() or proc.stdout.decode("utf-8", "replace").strip()
+        log.warning("command %s exited %s: %s", args[:3], proc.returncode, detail[:300])
+    return proc.returncode
 
 
 _WIFI_SPECIAL = str.maketrans({c: "\\" + c for c in '\\;,:"'})

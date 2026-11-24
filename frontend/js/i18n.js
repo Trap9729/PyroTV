@@ -8,6 +8,11 @@ export const sv = {
   "common.cancel": "Avbryt",
   "common.ok": "OK",
 
+  "keyboard.shift": "Skift",
+  "keyboard.back": "Radera",
+  "keyboard.space": "Mellanslag",
+  "keyboard.enter": "Klar",
+
   "boot.errorTitle": "Kunde inte ansluta till PyroTV",
   "boot.errorHint": "Kontrollera att enheten är igång och försök igen om en stund.",
 
