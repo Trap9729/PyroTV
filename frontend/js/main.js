@@ -1,5 +1,7 @@
 import { getState, openEvents } from "./api.js";
 import { t } from "./i18n.js";
+import { initKeyboard } from "./keyboard.js";
+import { isKioskHost } from "./keyboard-logic.js";
 import { buildRoute, parseRoute } from "./router.js";
 import { renderGrid } from "./views/grid.js";
 import { renderPlayer } from "./views/player.js";
@@ -14,6 +16,9 @@ document.addEventListener("contextmenu", (e) => {
   if (!e.target.closest?.("input, textarea")) e.preventDefault();
 });
 document.addEventListener("touchstart", () => {}, { passive: true });
+
+// The touchscreen has no system keyboard: draw our own (phones use theirs).
+if (isKioskHost(location.hostname, location.search)) initKeyboard();
 
 const listeners = new Map(); // type -> Set<fn>
 let events = null;

@@ -6,6 +6,35 @@ import { showToast } from "../toast.js";
 const SEARCH_DEBOUNCE_MS = 200;
 
 // Remembered across visits so returning from the player keeps the filter and scroll.
+const SHOP_FS_MAX = 1.6; // rem; matches the CSS default
+const SHOP_FS_ONE_LINE_MIN = 1.2; // rem; smaller than this, wrap to two lines instead
+const SHOP_FS_TWO_LINES = 1.3; // rem; start size for two lines
+const SHOP_FS_MIN = 0.95; // rem; below this the name is ellipsised instead
+
+// Shrink the shop name until it fits its column; if one line gets too small,
+// wrap to two lines and shrink from there. Ellipsis only as the last resort.
+function fitShopName(node) {
+  node.style.removeProperty("--shop-fs");
+  node.classList.remove("two-lines");
+  if (!node.isConnected || node.clientWidth === 0) return;
+  const overflows = () => node.scrollWidth > node.clientWidth + 1 || node.scrollHeight > node.clientHeight + 1;
+  const shrink = (from, min) => {
+    let fs = from;
+    node.style.setProperty("--shop-fs", `${fs}rem`);
+    while (overflows() && fs > min) {
+      fs = Math.max(min, +(fs * 0.94).toFixed(3));
+      node.style.setProperty("--shop-fs", `${fs}rem`);
+    }
+    return !overflows();
+  };
+  if (shrink(SHOP_FS_MAX, SHOP_FS_ONE_LINE_MIN)) {
+    if (SHOP_FS_MAX === parseFloat(node.style.getPropertyValue("--shop-fs"))) node.style.removeProperty("--shop-fs");
+    return;
+  }
+  node.classList.add("two-lines");
+  shrink(SHOP_FS_TWO_LINES, SHOP_FS_MIN);
+}
+
 const memory = { chip: "all", q: "", scrollTop: 0 };
 
 function chipQuery(chip) {
@@ -274,8 +303,11 @@ export function renderGrid(root, ctx) {
   const unsubTv = ctx.subscribe("tv", updateTv);
   const unsubState = ctx.subscribe("state", () => {
     shopName.textContent = ctx.state?.shop_name || t("app.name");
+    fitShopName(shopName);
     updateTv();
   });
+  const onResize = () => fitShopName(shopName);
+  window.addEventListener("resize", onResize);
 
   // ---- initial paint ----
   updateTv();
@@ -283,9 +315,11 @@ export function renderGrid(root, ctx) {
   renderChips();
   loadCategories();
   load({ restoreScroll: true });
+  requestAnimationFrame(() => fitShopName(shopName)); // needs layout
 
   return () => {
     disposed = true;
+    window.removeEventListener("resize", onResize);
     clearTimeout(debounceTimer);
     unsubTv();
     unsubState();

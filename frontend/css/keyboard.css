@@ -1,0 +1,44 @@
+/* On-screen keyboard (kiosk only). Fixed to the bottom; .app shrinks by --kb-h. */
+
+.app { bottom: var(--kb-h, 0px); }
+
+.kb {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  padding: 8px 10px;
+  background: #0e1226;
+  border-top: 1px solid var(--line-strong);
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+.kb[hidden] { display: none; }
+
+.kb-row { display: flex; justify-content: center; }
+
+.kb-key {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 58px;
+  /* The gap between keys is a transparent border: it is part of the button, so a
+     tap that lands between two keys still hits one of them. */
+  border: 4px solid transparent;
+  background-clip: padding-box;
+  border-radius: 14px;
+  background-color: var(--surface-2);
+  color: var(--text);
+  font-size: 1.45rem;
+  font-weight: 600;
+  display: grid;
+  place-items: center;
+}
+.kb-key:active { filter: brightness(1.5); }
+.kb-special { background-color: var(--surface-3); color: var(--text-2); font-size: 1.2rem; }
+.kb-key.on { background-color: var(--accent); color: var(--accent-ink); }
+.kb-enter { background-color: var(--accent); color: var(--accent-ink); font-weight: 700; }

@@ -32,7 +32,7 @@
   border: 1px solid transparent;
   transition: transform 120ms var(--ease);
 }
-.set-tab:active { transform: scale(0.97); }
+.set-tab:active { filter: brightness(0.82); }
 .set-tab[aria-selected="true"] {
   color: var(--text);
   background: var(--surface-2);

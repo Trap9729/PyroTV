@@ -219,7 +219,7 @@ install_packages() {
         chromium="$(chromium_package)"
     fi
     local -a pkgs=(
-        sway squeekboard "$chromium" mpv ffmpeg
+        sway "$chromium" mpv ffmpeg
         pipewire pipewire-pulse wireplumber pulseaudio-utils
         network-manager dnsmasq-base polkitd avahi-daemon
         python3-venv python3-pip curl rsync
@@ -263,7 +263,7 @@ create_user() {
 }
 
 setup_session() {
-    log "Kiosk session: autologin on tty1 -> sway -> squeekboard + Chromium"
+    log "Kiosk session: autologin on tty1 -> sway -> Chromium"
     local home="/home/$APP_USER"
     run systemctl set-default multi-user.target
 
@@ -292,26 +292,21 @@ EOF
         info "installed $home/.config/sway/config"
     fi
 
-    # squeekboard settings as system-wide dconf defaults (no D-Bus session is
-    # needed at install time). UNVERIFIED: that squeekboard 1.21 needs the a11y
-    # key and picks the Swedish layout from input-sources.
-    write_file /etc/dconf/profile/user 0644 root:root <<'EOF'
-user-db:user
-system-db:local
+    # Chromium managed policy: no "Translate this page?" bubble over the kiosk
+    # (the page is Swedish but Chromium's own UI language is not). Both policy
+    # directories are written: Debian's chromium reads /etc/chromium/..., some
+    # Raspberry Pi builds read /etc/chromium-browser/....
+    local dir
+    for dir in /etc/chromium/policies/managed /etc/chromium-browser/policies/managed; do
+        write_file "$dir/pyrotv.json" 0644 root:root <<'EOF'
+{
+  "TranslateEnabled": false,
+  "PasswordManagerEnabled": false,
+  "BrowserSignin": 0,
+  "MetricsReportingEnabled": false
+}
 EOF
-    write_file /etc/dconf/db/local.d/00-pyrotv 0644 root:root <<'EOF'
-# PyroTV: on-screen keyboard on, Swedish layout.
-[org/gnome/desktop/a11y/applications]
-screen-keyboard-enabled=true
-
-[org/gnome/desktop/input-sources]
-sources=[('xkb', 'se')]
-EOF
-    if (( DRY_RUN )) || have dconf; then
-        run dconf update
-    else
-        warn "dconf not found; squeekboard defaults not compiled (apt install dconf-cli; dconf update)"
-    fi
+    done
 }
 
 # --- data partition -------------------------------------------------------------
@@ -378,10 +373,13 @@ confirm_disk_change() {
 
 # Signature check: 0 = something is on the device, 1 = blank. Dies on errors.
 has_signature() {
-    local rc=0
-    blkid -p "$1" >/dev/null 2>&1 || rc=$?
+    # Plain `blkid -p` also prints PART_ENTRY_* lines (the partition table
+    # entry), so even a blank partition "has output". Ask only for the
+    # on-disk signature usage (filesystem, raid, crypto, ...).
+    local rc=0 usage
+    usage="$(blkid -p -o value -s USAGE "$1" 2>/dev/null)" || rc=$?
     case "$rc" in
-        0) return 0 ;;
+        0) [[ -n "$usage" ]] && return 0 || return 1 ;;
         2) return 1 ;;
         *) die "blkid -p $1 failed (exit $rc)" ;;
     esac
@@ -632,10 +630,14 @@ install_unit() {
 install_system_config() {
     log "System configuration (polkit, USB automount, journald, swap)"
     if (( DRY_RUN )); then
-        info "[dry-run] install $SCRIPT_DIR/50-pyrotv-nm.rules -> /etc/polkit-1/rules.d/"
+        info "[dry-run] install $SCRIPT_DIR/00-pyrotv-nm.rules -> /etc/polkit-1/rules.d/"
     else
-        install -D -m 0644 "$SCRIPT_DIR/50-pyrotv-nm.rules" /etc/polkit-1/rules.d/50-pyrotv-nm.rules
-        info "installed /etc/polkit-1/rules.d/50-pyrotv-nm.rules"
+        # The "00-" prefix matters: polkit stops at the first rule that decides, and
+        # rules run in filename order, so a "50-" rule was answered (denied) by an
+        # earlier stock rule before it was ever consulted. Drop the old name.
+        rm -f /etc/polkit-1/rules.d/50-pyrotv-nm.rules
+        install -D -m 0644 "$SCRIPT_DIR/00-pyrotv-nm.rules" /etc/polkit-1/rules.d/00-pyrotv-nm.rules
+        info "installed /etc/polkit-1/rules.d/00-pyrotv-nm.rules"
     fi
 
     sed -e "s/@PYROTV_UID@/$APP_UID/g" -e "s/@PYROTV_GID@/$APP_GID/g" "$SCRIPT_DIR/99-pyrotv-usb.rules" \

@@ -105,7 +105,7 @@ button:focus-visible, .search-input:focus-visible { box-shadow: var(--focus); }
   font-size: 1.05rem;
   transition: transform 120ms var(--ease), opacity 120ms;
 }
-.btn:active { transform: scale(0.96); }
+.btn:active { filter: brightness(0.82); }
 .btn:disabled { opacity: 0.5; }
 .btn-primary { background: var(--accent-grad); color: var(--accent-ink); }
 .btn-ghost { background: var(--surface-2); border: 1px solid var(--line); color: var(--text); }
@@ -123,7 +123,19 @@ button:focus-visible, .search-input:focus-visible { box-shadow: var(--focus); }
   transition: transform 120ms var(--ease), color 120ms;
 }
 .icon-btn .icon { width: 28px; height: 28px; }
-.icon-btn:active { transform: scale(0.92) rotate(30deg); color: var(--accent); }
+.icon-btn:active { filter: brightness(0.82); color: var(--accent); }
+
+/* Hit areas. A press animation must never move or shrink the element under the
+   finger: Chromium then fires the click on an ancestor and the tap is lost.
+   So :active only changes brightness, and every button gets an invisible
+   hit area reaching ~6px past its visible edge. */
+.btn, .icon-btn, .chip, .bar-btn, .tv-btn, .set-tab { position: relative; }
+.btn::after, .icon-btn::after, .chip::after, .bar-btn::after, .tv-btn::after,
+.set-tab::after, .player-exit::after, .big-play::after, .search-clear::after {
+  content: "";
+  position: absolute;
+  inset: -6px;
+}
 
 /* ---------- top bar ---------- */
 
@@ -132,7 +144,7 @@ button:focus-visible, .search-input:focus-visible { box-shadow: var(--focus); }
 .topbar {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(280px, 560px) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1.4fr) minmax(240px, 480px) minmax(max-content, 0.6fr);
   grid-template-areas: "brand search tools";
   align-items: center;
   gap: 20px;
@@ -157,12 +169,22 @@ button:focus-visible, .search-input:focus-visible { box-shadow: var(--focus); }
 .brand-mark { width: 38px; height: 38px; flex: none; color: var(--accent); }
 .shop-name {
   margin: 0;
-  font-size: 1.6rem;
+  font-size: var(--shop-fs, 1.6rem); /* shrunk to fit by fitShopName() in grid.js */
   font-weight: 750;
   letter-spacing: -0.01em;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.shop-name.two-lines {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.1;
 }
 
 .search {
@@ -261,7 +283,7 @@ button:focus-visible, .search-input:focus-visible { box-shadow: var(--focus); }
   border: 1px solid var(--line);
   transition: transform 120ms var(--ease);
 }
-.chip:active { transform: scale(0.95); }
+.chip:active { filter: brightness(0.82); }
 .chip[aria-pressed="true"] {
   color: var(--accent-ink);
   background: var(--accent-grad);
@@ -304,7 +326,7 @@ button:focus-visible, .search-input:focus-visible { box-shadow: var(--focus); }
   contain-intrinsic-size: auto 290px;
   transition: transform 140ms var(--ease), opacity 140ms;
 }
-.tile:active { transform: scale(0.965); }
+.tile:active { filter: brightness(0.82); }
 .tile:focus-visible { box-shadow: var(--focus); }
 .grid-view.busy .tile:not(.starting) { opacity: 0.55; }
 .tile.starting { transform: scale(0.965); border-color: var(--accent); }
@@ -422,7 +444,6 @@ button:focus-visible, .search-input:focus-visible { box-shadow: var(--focus); }
     gap: 12px;
     padding-top: 14px;
   }
-  .shop-name { font-size: 1.35rem; }
   .brand-mark { width: 30px; height: 30px; }
   .tv-pill span { display: none; }
   .tv-pill { padding: 0 10px; }

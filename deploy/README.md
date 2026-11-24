@@ -23,7 +23,7 @@ default) for managing the shop's PyroTV from a phone.
 | `kiosk.sh` | `/opt/pyrotv/deploy/` | Waits for the backend, keeps Chromium running |
 | `offline.html` | `/opt/pyrotv/deploy/` | Static page Chromium shows if the backend is not up after ~90 s; retries every 5 s |
 | `hotspot-setup.sh` | `/opt/pyrotv/deploy/` | NetworkManager profile `pyrotv-hotspot` + `/data/hotspot.json` |
-| `50-pyrotv-nm.rules` | `/etc/polkit-1/rules.d/` | Lets user `pyrotv` switch the hotspot with `nmcli` |
+| `00-pyrotv-nm.rules` | `/etc/polkit-1/rules.d/` | Lets user `pyrotv` switch the hotspot with `nmcli` |
 | `99-pyrotv-usb.rules` | `/etc/udev/rules.d/` | Mounts FAT/exFAT USB sticks at `/media/usb-sdXN` for backup export/import |
 | `overlay.sh` | `/opt/pyrotv/deploy/` | `status` / `enable` / `disable` the read-only root |
 | `update.sh` | run from the repo | `git pull`, reinstall app, restart (refuses while the overlay is on) |
@@ -33,8 +33,9 @@ default) for managing the shop's PyroTV from a phone.
 - **One user for the whole appliance: `pyrotv`** (groups `video`, `audio`,
   `render`, `input`, `netdev`). tty1 logs in automatically as `pyrotv`
   (`getty@tty1` drop-in) and `~/.bash_profile` runs `sway` (only on tty1,
-  only if no Wayland session is running). sway starts `squeekboard` (on-screen
-  keyboard) and `kiosk.sh` (Chromium).
+  only if no Wayland session is running). sway starts `kiosk.sh` (Chromium). The
+  on-screen keyboard is part of the web app (`frontend/js/keyboard.js`, only on
+  the touchscreen, i.e. when the page is loaded from `127.0.0.1`).
 - **The backend is a system service running as that same user**, so the `mpv`
   it spawns for the TV opens sway's Wayland socket and the user's PipeWire, and
   its `pactl` calls switch that PipeWire's default sink. `/etc/pyrotv.env`
@@ -76,8 +77,7 @@ procedure below rely on. Checked against the RPi-Distro sources (pi-gen
   `stage2/04-cloud-init`), not Bookworm's `firstrun.sh`/`custom.toml`.
 - **Packages and swap.** Trixie ships its own swap setup (zram by default,
   according to a Raspberry Pi staff comment on the Trixie announcement).
-  Chromium packaging and the availability of `squeekboard` were not checked
-  for Trixie.
+  Chromium packaging was not checked for Trixie.
 - **Overlay.** `raspi-config`'s overlay code (`trixie` branch) still adds a
   bare `overlayroot=tmpfs` and greps for it the same way. So `overlay.sh` would
   probably work, but this was not tested.
@@ -171,7 +171,7 @@ Sources:
 
 1. Preflight: Linux, root, aarch64. Stops unless `VERSION_CODENAME` is
    `bookworm` (override: `--allow-other-os`). Also stops while the overlay is on.
-2. `apt-get install`: sway, squeekboard, Chromium (`chromium-browser` if the
+2. `apt-get install`: sway, Chromium (`chromium-browser` if the
    Pi repository offers it, else `chromium`), mpv, ffmpeg, PipeWire
    (`pipewire`, `pipewire-pulse`, `wireplumber`), `pulseaudio-utils`
    (`pactl`), NetworkManager + `dnsmasq-base`, `polkitd`, `avahi-daemon`,
@@ -185,8 +185,8 @@ Sources:
 6. `/etc/pyrotv.env` (from `pyrotv.env.example`, kept if it already exists).
 7. `pyrotv.service`, the polkit rule, the USB mount rule, journald and zram
    settings.
-8. The kiosk session (autologin, `.bash_profile`, sway config, squeekboard
-   defaults), host name `pyrotv` (so `http://pyrotv.local` works over mDNS).
+8. The kiosk session (autologin, `.bash_profile`, sway config, Chromium
+   managed policy that turns off the translate bubble), host name `pyrotv` (so `http://pyrotv.local` works over mDNS).
 9. The hotspot profile (`hotspot-setup.sh`).
 10. Starts the backend.
 11. **Last**: the read-only root and boot partition (`overlay.sh enable`), so
@@ -388,7 +388,7 @@ fix the files here where reality differs.
       during a settings change (several times); the Pi boots back into the app
       and the database is intact.
 - [ ] **Memory under the 1 GB cap** (`total_mem=1024` or a real 1 GB board):
-      Chromium + squeekboard + sway + backend + mpv on the TV, with
+      Chromium + sway + backend + mpv on the TV, with
       `free -m` / `top` over a long run (Task 16 soak: `MemAvailable` stays
       >= 150 MB for 8 hours); no OOM kills
       (`journalctl -k | grep -i oom`). Tune the kiosk flags
@@ -401,16 +401,14 @@ fix the files here where reality differs.
 - [ ] **Chromium**: the Wayland `app_id` (`swaymsg -t get_tree | grep app_id`)
       matches `^chromium`; 1080p30 `<video>` is smooth on the touchscreen;
       which package/binary is installed (`chromium-browser` or `chromium`).
-- [ ] **On-screen keyboard (high risk)**: tapping the search box, the shop
-      name field and the custom piece name field makes squeekboard appear, it
-      types into Chromium, and the layout is Swedish (å ä ö). This depends on
-      Chromium's `--enable-wayland-ime --wayland-text-input-version=3`
-      (text-input-v3, the only version sway offers) and on squeekboard's
-      settings (`/etc/dconf/db/local.d/00-pyrotv`: a11y
-      `screen-keyboard-enabled`, input source `('xkb','se')`; inspect with
-      `sudo -u pyrotv dbus-run-session gsettings get org.gnome.desktop.input-sources sources`).
-      **Fallback if this cannot be made to work: an in-app HTML keyboard in
-      the frontend would be needed (not built).**
+- [ ] **On-screen keyboard**: tapping the search box, the shop name field and
+      the custom piece name field shows the app's own keyboard (å ä ö,
+      shift, ?123 symbols, hold-to-repeat backspace, "Klar" closes it) and
+      the page shrinks above it. It does not appear on a phone over the
+      hotspot. (squeekboard is no longer used: it could not draw above the
+      fullscreen Chromium.)
+- [ ] **Translate bubble**: no "Translate this page?" popup after boot
+      (`/etc/chromium/policies/managed/pyrotv.json`; check `chrome://policy`).
 - [ ] **Touch**: touches land on the touchscreen, also with the TV connected
       (`input type:touch map_to_output HDMI-A-1`); the cursor stays hidden.
 - [ ] **HDMI names / hot-plug**: which physical port is `HDMI-A-1`; plugging

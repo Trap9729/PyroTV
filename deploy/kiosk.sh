@@ -7,8 +7,9 @@
 # (deploy/offline.html), which switches to the app by itself once it answers.
 # Output goes to sway's stdout, i.e. the journal (`journalctl -t sway`).
 #
-# UNVERIFIED on hardware: the Chromium flags (especially the Wayland IME ones
-# and the memory limits) must be checked on the real 1 GB Pi.
+# UNVERIFIED on hardware: the Chromium flags (especially the memory limits)
+# must be checked on the real 1 GB Pi. The translate bubble is switched off by
+# the managed policy installed by install.sh (the old flags no longer work).
 set -euo pipefail
 
 readonly URL="http://127.0.0.1/"          # loopback IP: allowed by the app's guard
@@ -86,11 +87,6 @@ main() {
     local -a flags=(
         --kiosk
         --ozone-platform=wayland
-        # On-screen keyboard: sway offers text-input-v3 only (not v1), and
-        # squeekboard listens through input-method-v2. Unknown flags are
-        # ignored by Chromium, so the version flag is harmless if absent.
-        --enable-wayland-ime
-        --wayland-text-input-version=3
         --noerrdialogs
         --disable-infobars
         --disable-pinch
