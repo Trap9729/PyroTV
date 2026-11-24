@@ -26,6 +26,7 @@ default) for managing the shop's PyroTV from a phone.
 | `00-pyrotv-nm.rules` | `/etc/polkit-1/rules.d/` | Lets user `pyrotv` switch the hotspot with `nmcli` |
 | `99-pyrotv-usb.rules` | `/etc/udev/rules.d/` | Mounts FAT/exFAT USB sticks at `/media/usb-sdXN` for backup export/import |
 | `overlay.sh` | `/opt/pyrotv/deploy/` | `status` / `enable` / `disable` the read-only root |
+| `touch-calibrate.py` | `/opt/pyrotv/deploy/` | Tap-the-4-corners touchscreen calibration, saved to `/data/touch-calibration.conf` |
 | `update.sh` | run from the repo | `git pull`, reinstall app, restart (refuses while the overlay is on) |
 
 ## How it fits together
@@ -411,6 +412,10 @@ fix the files here where reality differs.
       (`/etc/chromium/policies/managed/pyrotv.json`; check `chrome://policy`).
 - [ ] **Touch**: touches land on the touchscreen, also with the TV connected
       (`input type:touch map_to_output HDMI-A-1`); the cursor stays hidden.
+      If taps land in the wrong place (e.g. the visible screen only covers a
+      corner of the touch area), run `python3 /opt/pyrotv/deploy/touch-calibrate.py`
+      as `pyrotv` and tap the four corners; it applies the calibration at once and
+      saves it to `/data/touch-calibration.conf` (`--reset` removes it).
 - [ ] **HDMI names / hot-plug**: which physical port is `HDMI-A-1`; plugging
       and unplugging the TV while running switches the app's TV state, moves
       audio, and sway re-places outputs sanely.

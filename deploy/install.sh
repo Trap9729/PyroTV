@@ -291,6 +291,10 @@ EOF
         install -d -o "$APP_USER" -g "$APP_USER" -m 0755 "$home/.config" "$home/.config/sway"
         install -o "$APP_USER" -g "$APP_USER" -m 0644 "$SCRIPT_DIR/sway.conf" "$home/.config/sway/config"
         info "installed $home/.config/sway/config"
+        # sway.conf includes this; keep an existing calibration, else create it empty.
+        if [[ -d "$DATA_MNT" && ! -e "$DATA_MNT/touch-calibration.conf" ]]; then
+            install -o "$APP_USER" -g "$APP_USER" -m 0644 /dev/null "$DATA_MNT/touch-calibration.conf"
+        fi
     fi
 
     # Chromium managed policy: no "Translate this page?" bubble over the kiosk
