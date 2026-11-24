@@ -4,8 +4,9 @@
 #   sudo ./deploy/update.sh [--no-pull] [--dry-run] [--allow-other-os]
 #
 # --allow-other-os is passed on to install.sh (see README "Which OS image").
-# Only the app is updated: files in /opt/pyrotv, the venv (pip) and the
-# systemd unit; then pyrotv.service is restarted and the kiosk browser is
+# Only the app is updated: files in /opt/pyrotv, the venv (pip), the
+# systemd unit and the config shipped in the repo (polkit rule, Chromium
+# policy, sway session); then pyrotv.service is restarted and the kiosk browser is
 # reloaded. Refuses to run while the overlay root is active, because the
 # update would vanish on the next reboot. The full procedure is:
 #   sudo deploy/overlay.sh disable && sudo reboot

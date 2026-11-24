@@ -13,8 +13,9 @@
 #   --ssid NAME        hotspot SSID (default PyroTV-<last 4 hex of wlan0 MAC>)
 #   --country CC       Wi-Fi regulatory country (default SE)
 #   --hostname NAME    host name, for http://NAME.local (default pyrotv)
-#   --app-only         only (re)install the app files, venv and unit, then
-#                      restart the service (used by deploy/update.sh)
+#   --app-only         only (re)install the app files, venv, unit and the
+#                      shipped config (polkit, Chromium policy, sway session),
+#                      then restart the service (used by deploy/update.sh)
 #   --allow-other-os   run on a release other than Bookworm (UNTESTED; the
 #                      installer refuses by default, see README "Which OS image")
 #
@@ -742,6 +743,11 @@ main() {
         install_app
         setup_env_file
         install_unit
+        # Config that ships in this repo and changes between releases: the
+        # polkit rule, Chromium policy, udev rule and the sway/kiosk session.
+        # All idempotent; none touches the data partition, hotspot or overlay.
+        install_system_config
+        setup_session
         start_backend
         summary
         return 0
