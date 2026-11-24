@@ -378,10 +378,13 @@ confirm_disk_change() {
 
 # Signature check: 0 = something is on the device, 1 = blank. Dies on errors.
 has_signature() {
-    local rc=0
-    blkid -p "$1" >/dev/null 2>&1 || rc=$?
+    # Plain `blkid -p` also prints PART_ENTRY_* lines (the partition table
+    # entry), so even a blank partition "has output". Ask only for the
+    # on-disk signature usage (filesystem, raid, crypto, ...).
+    local rc=0 usage
+    usage="$(blkid -p -o value -s USAGE "$1" 2>/dev/null)" || rc=$?
     case "$rc" in
-        0) return 0 ;;
+        0) [[ -n "$usage" ]] && return 0 || return 1 ;;
         2) return 1 ;;
         *) die "blkid -p $1 failed (exit $rc)" ;;
     esac
